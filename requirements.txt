@@ -26,3 +26,9 @@ python-magic
 tiktoken
 Pygments
 ollama-python
+# Additional dependencies
+keyring
+markdown
+PyPDF2
+plotly
+reportlab

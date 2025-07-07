@@ -134,7 +134,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTe
                              QTreeWidget, QTreeWidgetItem, QFormLayout, QSpacerItem, QButtonGroup,
                              QRadioButton, QSlider, QSpinBox, QDoubleSpinBox, QDateTimeEdit,
                              QCalendarWidget, QColorDialog, QFontDialog, QWizard, QWizardPage,
-                             QDockWidget, QMdiArea, QMdiSubWindow, QDesktopWidget, QSplashScreen)
+                             QDockWidget, QMdiArea, QMdiSubWindow, QSplashScreen)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize, QSettings, QPropertyAnimation, QEasingCurve, QPoint
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QAction, QTextCursor, QTextCharFormat, QColor, QCloseEvent, QKeySequence, QCursor
 
