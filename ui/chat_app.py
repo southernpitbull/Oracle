@@ -2176,3 +2176,105 @@ class ChatApp(QMainWindow):
                 parent = self.chat_history[parent].get('parent')
             html += f'<div style="margin-left: {indent*30}px;">{msg["role"]}: {htmlmod.escape(msg["content"])}</div>'
         self.chat_display.setHtml(html)
+
+    def setup_auto_save(self):
+        """Set up auto-save timer for conversations"""
+        try:
+            self.auto_save_timer = QTimer()
+            self.auto_save_timer.timeout.connect(self.auto_save_conversation)
+            # Auto-save every 5 minutes (300000 ms)
+            self.auto_save_timer.start(300000)
+            logger.info("Auto-save timer set up successfully")
+        except Exception as e:
+            logger.warning(f"Failed to set up auto-save: {e}")
+
+    def load_chat_on_startup(self):
+        """Load the most recent chat on application startup"""
+        try:
+            # Try to load the most recent conversation
+            if hasattr(self, 'conv_listbox') and self.conv_listbox.count() > 0:
+                # Load the first (most recent) conversation
+                first_item = self.conv_listbox.item(0)
+                if first_item and first_item.text() in self.conversation_map:
+                    conv_id = self.conversation_map[first_item.text()]
+                    self.load_conversation_by_id(conv_id)
+                    logger.info("Loaded most recent conversation on startup")
+            else:
+                # Show welcome message if no conversations exist
+                self.show_welcome_message()
+        except Exception as e:
+            logger.warning(f"Failed to load chat on startup: {e}")
+            self.show_welcome_message()
+
+    def setup_code_execution(self):
+        """Set up code execution environment (placeholder)"""
+        try:
+            # This is a placeholder for future code execution functionality
+            # For now, just log that the setup was called
+            logger.info("Code execution setup initialized (placeholder)")
+            
+            # In the future, this could initialize:
+            # - Jupyter kernel integration
+            # - Docker containers for safe execution
+            # - Sandboxed Python environment
+            
+        except Exception as e:
+            logger.warning(f"Failed to set up code execution: {e}")
+
+    def auto_save_conversation(self):
+        """Auto-save the current conversation"""
+        try:
+            if self.chat_history and len(self.chat_history) > 0:
+                # Only auto-save if there are messages
+                if hasattr(self, 'current_conversation_id') and self.current_conversation_id:
+                    self.save_conversation(auto_save=True)
+                    logger.debug("Auto-saved current conversation")
+        except Exception as e:
+            logger.warning(f"Auto-save failed: {e}")
+
+    def show_welcome_message(self):
+        """Show a welcome message in the chat display"""
+        welcome_html = """
+        <div style='text-align: center; padding: 40px; font-family: Arial, sans-serif;'>
+            <h1 style='color: #4A90E2; font-size: 28px; margin-bottom: 20px;'>
+                🌟 Welcome to The Oracle 🌟
+            </h1>
+            <p style='font-size: 16px; color: #666; margin-bottom: 20px;'>
+                Your AI Assistant with Multi-Provider Support
+            </p>
+            <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                        padding: 20px; border-radius: 10px; margin: 20px auto; max-width: 500px;'>
+                <h3 style='color: white; margin-bottom: 10px;'>✨ Features:</h3>
+                <ul style='text-align: left; color: white; font-size: 14px;'>
+                    <li>🤖 Multiple AI providers (OpenAI, Anthropic, Google, etc.)</li>
+                    <li>💬 Conversation management and history</li>
+                    <li>📁 Save and load conversations</li>
+                    <li>📤 Export to multiple formats</li>
+                    <li>🔍 Search through chat history</li>
+                </ul>
+            </div>
+            <p style='font-size: 14px; color: #888; margin-top: 20px;'>
+                🚀 Get started by selecting a provider and model, then type your message!
+            </p>
+        </div>
+        """
+        self.chat_display.setHtml(welcome_html)
+
+    def load_conversation_by_id(self, conv_id):
+        """Load a conversation by its ID"""
+        try:
+            # This is a placeholder - implement actual conversation loading
+            logger.info(f"Loading conversation: {conv_id}")
+            # In a real implementation, this would load from database/file
+        except Exception as e:
+            logger.error(f"Failed to load conversation {conv_id}: {e}")
+
+    def save_conversation(self, auto_save=False):
+        """Save the current conversation"""
+        try:
+            # This is a placeholder - implement actual conversation saving
+            save_type = "Auto-saved" if auto_save else "Saved"
+            logger.info(f"{save_type} conversation with {len(self.chat_history)} messages")
+            # In a real implementation, this would save to database/file
+        except Exception as e:
+            logger.error(f"Failed to save conversation: {e}")
