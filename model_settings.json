@@ -1,0 +1,47 @@
+{
+  "Nebius AI Studio::Qwen/Qwen2.5-VL-72B-Instruct": {
+    "temperature": 0.075,
+    "max_tokens": 4096,
+    "top_p": 1.0,
+    "top_k": 50,
+    "frequency_penalty": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "min_p": 0.011,
+    "typical_p": 0.469,
+    "seed": -1,
+    "stop": [
+      "\\n\\n",
+      "</s>",
+      "<|endoftext|>",
+      "Human:",
+      "Assistant:",
+      "User:"
+    ]
+  },
+  "Nebius AI Studio::google/gemma-3-27b-it-fast": {
+    "temperature": 0.075,
+    "max_tokens": 4096,
+    "top_p": 1.0,
+    "top_k": 50,
+    "frequency_penalty": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "min_p": 0.011,
+    "typical_p": 0.469,
+    "seed": -1
+  },
+  "Google Gemini::gemini-pro": {
+    "temperature": 0.075,
+    "max_tokens": 4096,
+    "top_p": 1.0,
+    "top_k": 50,
+    "frequency_penalty": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 0.988,
+    "min_p": 0.011,
+    "typical_p": 0.469,
+    "seed": -1,
+    "safety_enabled": true
+  }
+}

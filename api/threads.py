@@ -10,21 +10,27 @@ class ModelResponseThread(QThread):
     response_finished = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, ollama_client, model, prompt):
+    def __init__(self, ollama_client, model, prompt, model_params=None, system_message=None):
         super().__init__()
         self.ollama_client = ollama_client
         self.model = model
         self.prompt = prompt
+        self.model_params = model_params or {}
+        self.system_message = system_message
 
     def run(self):
         try:
-            response = self.ollama_client.generate(model=self.model, prompt=self.prompt, stream=True)
+            # Use the OllamaClient's generate_response method
             full_response = ""
-            for chunk in response:
-                token = chunk.get('response') or chunk.get('message') or chunk.get('content') or ''
-                if token:
-                    full_response += token
-                    self.response_chunk.emit(token)
+            for chunk in self.ollama_client.generate_response(
+                self.prompt,
+                self.model,
+                stream=True,
+                system_message=self.system_message,
+                model_params=self.model_params
+            ):
+                full_response += chunk
+                self.response_chunk.emit(chunk)
             self.response_finished.emit(full_response)
         except Exception as e:
             self.error_occurred.emit(str(e))
@@ -36,16 +42,26 @@ class MultiProviderResponseThread(QThread):
     response_finished = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, client, prompt, system_message=None):
+    def __init__(self, client, prompt, provider=None, model=None, system_message=None, model_params=None):
         super().__init__()
         self.client = client
         self.prompt = prompt
+        self.provider = provider
+        self.model = model
         self.system_message = system_message
+        self.model_params = model_params or {}
 
     def run(self):
         try:
             full_response = ""
-            for chunk in self.client.generate_response(self.prompt, system_message=self.system_message, stream=True):
+            for chunk in self.client.generate_response(
+                self.prompt,
+                provider_name=self.provider,
+                model_name=self.model,
+                system_message=self.system_message, 
+                stream=True,
+                model_params=self.model_params
+            ):
                 full_response += chunk
                 self.response_chunk.emit(chunk)
             self.response_finished.emit(full_response)

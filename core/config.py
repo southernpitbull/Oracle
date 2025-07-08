@@ -86,11 +86,12 @@ except ImportError:
 
 # Ollama and ML imports with fallback
 try:
-    from ollama import Client as OllamaClient
+    import ollama
     OLLAMA_AVAILABLE = True
+    OllamaLib = ollama  # Store reference to ollama library
 except ImportError:
     OLLAMA_AVAILABLE = False
-    OllamaClient = None
+    OllamaLib = None
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -135,11 +136,16 @@ except ImportError:
 
 # API client imports
 try:
-    import google.generativeai as genai
+    import google.genai as genai
     GEMINI_AVAILABLE = True
 except ImportError:
-    genai = None
-    GEMINI_AVAILABLE = False
+    try:
+        # Fallback to old library
+        import google.generativeai as genai
+        GEMINI_AVAILABLE = True
+    except ImportError:
+        genai = None
+        GEMINI_AVAILABLE = False
 
 try:
     import anthropic

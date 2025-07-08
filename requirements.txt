@@ -11,6 +11,7 @@ seaborn
 transformers
 ollama
 PyQt6
+google-genai
 google-generativeai
 anthropic
 openai

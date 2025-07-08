@@ -9,8 +9,10 @@ from core.config import (html, re, hashlib, PYGMENTS_AVAILABLE, highlight,
 class MessageFormatter:
     """Handles formatting of chat messages with markdown, code highlighting, etc."""
     
-    def __init__(self, dark_theme=True):
+    def __init__(self, dark_theme=True, show_line_numbers=False, enable_code_folding=False):
         self.dark_theme = dark_theme
+        self.show_line_numbers = show_line_numbers
+        self.enable_code_folding = enable_code_folding
     
     def format_message(self, text, current_model=None):
         """Format message with enhanced styling and features"""
@@ -132,6 +134,119 @@ class MessageFormatter:
         
         return text
     
+    def _detect_foldable_sections(self, code_text, lang):
+        """Detect functions, classes, and other foldable sections in code"""
+        lines = code_text.split('\n')
+        foldable_sections = []
+        
+        if lang.lower() in ['python', 'py']:
+            # Python function and class detection
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith('def ') or stripped.startswith('class '):
+                    # Find the end of this function/class (next def/class or unindented line)
+                    indent_level = len(line) - len(line.lstrip())
+                    start_line = i
+                    end_line = len(lines) - 1
+                    
+                    for j in range(i + 1, len(lines)):
+                        current_line = lines[j]
+                        if current_line.strip():  # Skip empty lines
+                            current_indent = len(current_line) - len(current_line.lstrip())
+                            if current_indent <= indent_level and (current_line.strip().startswith('def ') or 
+                                                                 current_line.strip().startswith('class ') or
+                                                                 current_indent == 0):
+                                end_line = j - 1
+                                break
+                    
+                    if end_line > start_line:
+                        foldable_sections.append({
+                            'start': start_line,
+                            'end': end_line,
+                            'type': 'function' if stripped.startswith('def ') else 'class',
+                            'name': stripped.split('(')[0].replace('def ', '').replace('class ', '').strip()
+                        })
+        
+        elif lang.lower() in ['javascript', 'js', 'typescript', 'ts']:
+            # JavaScript/TypeScript function detection
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if ('function ' in stripped or 
+                    stripped.startswith('const ') and '=>' in stripped or
+                    stripped.startswith('let ') and '=>' in stripped or
+                    stripped.startswith('var ') and '=>' in stripped):
+                    
+                    # Simple bracket matching for JS functions
+                    brace_count = 0
+                    start_line = i
+                    end_line = i
+                    
+                    for j in range(i, len(lines)):
+                        line_text = lines[j]
+                        brace_count += line_text.count('{') - line_text.count('}')
+                        if brace_count == 0 and j > i and '{' in lines[i:j+1][0]:
+                            end_line = j
+                            break
+                    
+                    if end_line > start_line:
+                        func_name = stripped.split('function ')[-1].split('(')[0].strip() if 'function ' in stripped else stripped.split(' ')[1].split('=')[0].strip()
+                        foldable_sections.append({
+                            'start': start_line,
+                            'end': end_line,
+                            'type': 'function',
+                            'name': func_name
+                        })
+        
+        return foldable_sections
+
+    def _apply_code_folding(self, highlighted_code, foldable_sections, code_id):
+        """Apply code folding to highlighted code"""
+        if not self.enable_code_folding or not foldable_sections:
+            return highlighted_code
+        
+        # Split the highlighted code into lines
+        lines = highlighted_code.split('\n')
+        
+        # Process foldable sections in reverse order to maintain line numbers
+        for section in reversed(foldable_sections):
+            start_idx = section['start']
+            end_idx = section['end']
+            section_type = section['type']
+            section_name = section['name']
+            
+            if start_idx < len(lines) and end_idx < len(lines):
+                # Create foldable section
+                header_line = lines[start_idx]
+                content_lines = lines[start_idx + 1:end_idx + 1]
+                
+                # Generate unique ID for this foldable section
+                section_id = f"{code_id}_fold_{start_idx}"
+                
+                folded_section = f'''
+                <details class="code-fold" data-section="{section_id}">
+                    <summary style="
+                        cursor: pointer;
+                        background-color: #3d4043;
+                        padding: 2px 8px;
+                        border-radius: 4px;
+                        margin: 2px 0;
+                        user-select: none;
+                        font-size: 12px;
+                        color: #8B949E;
+                    ">
+                        ▶ {section_type}: {section_name} ({len(content_lines)} lines)
+                    </summary>
+                    <div style="margin-left: 20px;">
+                        {header_line}
+                        {chr(10).join(content_lines)}
+                    </div>
+                </details>'''
+                
+                # Replace the section with the foldable version
+                lines[start_idx:end_idx + 1] = [folded_section]
+        
+        return '\n'.join(lines)
+
     def _format_code_blocks(self, text):
         """Format code blocks with syntax highlighting"""
         def highlight_code(match):
@@ -144,17 +259,55 @@ class MessageFormatter:
             # Generate unique ID for this code block
             code_id = hashlib.md5(code_to_highlight.encode()).hexdigest()[:8]
 
+            # Detect foldable sections if code folding is enabled
+            foldable_sections = []
+            if self.enable_code_folding:
+                foldable_sections = self._detect_foldable_sections(code_to_highlight, lang)
+
             if PYGMENTS_AVAILABLE:
                 try:
                     lexer = get_lexer_by_name(lang, stripall=True)
                 except Exception:
                     lexer = TextLexer()
 
-                formatter = HtmlFormatter(style='monokai', noclasses=True)
+                # Configure formatter with line numbers if enabled
+                if self.show_line_numbers:
+                    formatter = HtmlFormatter(
+                        style='monokai', 
+                        noclasses=True, 
+                        linenos='inline',
+                        linenostart=1,
+                        linenospecial=0,
+                        linenumsep=' '
+                    )
+                else:
+                    formatter = HtmlFormatter(style='monokai', noclasses=True)
+                    
                 highlighted_code = highlight(code_to_highlight, lexer, formatter)
             else:
                 # Fallback without syntax highlighting
-                highlighted_code = f'<pre style="background-color: #272822; color: #f8f8f2; padding: 10px; border-radius: 4px; overflow-x: auto;"><code>{html.escape(code_to_highlight)}</code></pre>'
+                if self.show_line_numbers:
+                    # Add line numbers manually for fallback
+                    lines = code_to_highlight.split('\n')
+                    numbered_lines = []
+                    for i, line in enumerate(lines, 1):
+                        numbered_lines.append(f'<span style="color: #8B949E; margin-right: 1em; user-select: none;">{i:>3}</span>{html.escape(line)}')
+                    highlighted_code = f'<pre style="background-color: #272822; color: #f8f8f2; padding: 10px; border-radius: 4px; overflow-x: auto;"><code>{"<br>".join(numbered_lines)}</code></pre>'
+                else:
+                    highlighted_code = f'<pre style="background-color: #272822; color: #f8f8f2; padding: 10px; border-radius: 4px; overflow-x: auto;"><code>{html.escape(code_to_highlight)}</code></pre>'
+            
+            # Apply code folding if enabled and sections were detected
+            if self.enable_code_folding and foldable_sections:
+                highlighted_code = self._apply_code_folding(highlighted_code, foldable_sections, code_id)
+            
+            # Determine features text for header
+            features = []
+            if self.show_line_numbers:
+                features.append("with line numbers")
+            if self.enable_code_folding and foldable_sections:
+                features.append(f"foldable ({len(foldable_sections)} sections)")
+            
+            features_text = f" ({', '.join(features)})" if features else ""
             
             # Create enhanced code block with copy button
             code_block_html = f'''
@@ -177,7 +330,7 @@ class MessageFormatter:
                     font-size: 12px;
                     color: #8B949E;
                 ">
-                    <span style="font-weight: 600; text-transform: uppercase;">{lang}</span>
+                    <span style="font-weight: 600; text-transform: uppercase;">{lang}{features_text}</span>
                     <button onclick="copyCode('{code_id}')" style="
                         background-color: #30363D;
                         border: 1px solid #373E47;

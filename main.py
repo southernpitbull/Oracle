@@ -61,58 +61,23 @@ from utils.dependencies import add_python_to_path, check_and_install_dependencie
 # Add Python to PATH before importing other modules
 add_python_to_path()
 
-# Check for GUI framework availability
-QT_AVAILABLE = False
-qt_import_error = None
-try:
-    from PyQt6.QtWidgets import QApplication
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtGui import QFont
-    QT_AVAILABLE = True
-except ImportError as e1:
-    try:
-        from PyQt5.QtWidgets import QApplication
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtGui import QFont
-        QT_AVAILABLE = True
-    except ImportError as e2:
-        try:
-            from PySide6.QtWidgets import QApplication
-            from PySide6.QtCore import Qt
-            from PySide6.QtGui import QFont
-            QT_AVAILABLE = True
-        except ImportError as e3:
-            try:
-                from PySide2.QtWidgets import QApplication
-                from PySide2.QtCore import Qt
-                from PySide2.QtGui import QFont
-                QT_AVAILABLE = True
-            except ImportError as e4:
-                qt_import_error = (e1, e2, e3, e4)
-                QT_AVAILABLE = False
-
-if not QT_AVAILABLE:
-    print("\n❌ No supported Qt GUI framework (PyQt6, PyQt5, PySide6, PySide2) is installed!")
-    print("Please install one of: PyQt6, PyQt5, PySide6, or PySide2.")
-    if qt_import_error:
-        print("Error details:")
-        for err in qt_import_error:
-            print(f"  - {err}")
-    sys.exit(1)
+# Check for GUI framework availability - PyQt6 is already imported at the top
+QT_AVAILABLE = True
 
 # Rich imports with fallback
 try:
     from rich.console import Console
     from rich.logging import RichHandler
     RICH_AVAILABLE = True
+    console = Console()
 except ImportError:
     RICH_AVAILABLE = False
     Console = None
     RichHandler = None
+    console = None
 
 # Setup logging
-if RICH_AVAILABLE:
-    console = Console()
+if RICH_AVAILABLE and console and RichHandler:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -150,16 +115,9 @@ except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     print(f"❌ Failed to import required modules: {e}")
     
-    # Try using the standalone version instead
-    try:
-        print("🔄 Attempting to use standalone version...")
-        import subprocess
-        subprocess.run([sys.executable, "standalone_oracle.py"])
-        sys.exit(0)
-    except Exception as fallback_error:
-        print(f"❌ Fallback also failed: {fallback_error}")
-        print("Please ensure all modules are properly installed.")
-        sys.exit(1)
+    # Show error and exit
+    print("Please ensure all modules are properly installed.")
+    sys.exit(1)
 
 
 def setup_application():
@@ -212,16 +170,7 @@ def main():
     except Exception as e:
         logger.error(f"Fatal error in main application: {e}")
         print(f"❌ Fatal error: {e}")
-        print("🔄 Attempting to launch standalone version...")
-        
-        # Try to launch standalone version as fallback
-        try:
-            import subprocess
-            subprocess.run([sys.executable, "standalone_oracle.py"])
-        except Exception as fallback_error:
-            print(f"❌ Fallback also failed: {fallback_error}")
-            print("Please check your installation and try again.")
-        
+        print("Please check your installation and try again.")
         sys.exit(1)
 
 

@@ -79,7 +79,7 @@ class APISettingsDialog(QDialog):
                 'website': 'https://platform.openai.com/api-keys'
             },
             'anthropic': {
-                'name': 'Anthropic (Claude)',
+                'name': 'Anthropic',
                 'description': 'For Claude 3, Claude 2, etc.',
                 'placeholder': 'sk-ant-...',
                 'env_var': 'ANTHROPIC_API_KEY',
@@ -105,6 +105,34 @@ class APISettingsDialog(QDialog):
                 'placeholder': 'sk-...',
                 'env_var': 'DASHSCOPE_API_KEY',
                 'website': 'https://dashscope.console.aliyun.com/apiKey'
+            },
+            'nebius': {
+                'name': 'Nebius AI Studio',
+                'description': 'For Nebius cloud AI models',
+                'placeholder': 'sk-...',
+                'env_var': 'NEBIUS_API_KEY',
+                'website': 'https://studio.nebius.ai/keys'
+            },
+            'huggingface': {
+                'name': 'Hugging Face',
+                'description': 'For Hugging Face models and Inference API',
+                'placeholder': 'hf_...',
+                'env_var': 'HUGGINGFACE_API_KEY',
+                'website': 'https://huggingface.co/settings/tokens'
+            },
+            'groq': {
+                'name': 'Groq',
+                'description': 'For fast inference with Groq chips',
+                'placeholder': 'gsk_...',
+                'env_var': 'GROQ_API_KEY',
+                'website': 'https://console.groq.com/keys'
+            },
+            'perplexity': {
+                'name': 'Perplexity',
+                'description': 'For Perplexity AI models',
+                'placeholder': 'pplx-...',
+                'env_var': 'PERPLEXITY_API_KEY',
+                'website': 'https://www.perplexity.ai/settings/api'
             }
         }
         

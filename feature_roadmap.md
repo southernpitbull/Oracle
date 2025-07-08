@@ -64,8 +64,8 @@ It serves as the development guide for implementing new features.
   * **[#89] Automatic File Organization:** ✅ Code block exports are now saved in a subfolder under `exports` named after the conversation ID for better organization.
   * **[#106] "Open in Editor" button:** ✅ Saved code files now have an "Open in Editor" button to launch them in the user's default code editor.
   * **[#159] Code Quality Metrics:** ✅ Generated code is run through a linter (e.g., pylint/flake8) and quality feedback is displayed in the UI.
-  * **[#254] Code Block Line Numbering:** An optional toggle to show line numbers inside code blocks for easier reference.
-  * **[#255] Code Folding:** The ability to collapse/expand functions or classes within large code blocks directly in the chat view.
+  * **[#254] Code Block Line Numbering:** ✅ An optional toggle to show line numbers inside code blocks for easier reference.
+  * **[#255] Code Folding:** ✅ The ability to collapse/expand functions or classes within large code blocks directly in the chat view.
   * **[#771] CSV/Excel to Markdown Table:** Drag a CSV or Excel file onto the app, and it will be converted into a Markdown table in the input box.
 * **Model & Prompting for Coders:**
   * **[#56] Model Parameter Sliders (Temperature, Top-p):** Expose common model parameters like Temperature, Top-p, and max tokens in a "Model Settings" panel, allowing for fine-grained control over generation.
@@ -76,17 +76,17 @@ It serves as the development guide for implementing new features.
 *Objective: Empower users to engineer better prompts and tailor the application to their needs.*
 
 * **Prompt Engineering Tools:**
-  * **[#18] Per-conversation System Prompt:** Allow the user to set a specific system prompt/persona for each conversation, which is stored and automatically applied every time that conversation is loaded.
-  * **[#111] Prompt Library:** A user-curated library of favorite or effective prompts, organized by category, that can be inserted into the chat with one click.
-  * **[#112] Prompt Templates with Variables:** Create prompt templates with placeholders (e.g., "Summarize the following text for a {{audience}}: {{text_to_summarize}}"), The UI would then present fields for the user to fill in.
+  * **[#18] Per-conversation System Prompt:** ✅ Allow the user to set a specific system prompt/persona for each conversation, which is stored and automatically applied every time that conversation is loaded.
+  * **[#111] Prompt Library:** ✅ A user-curated library of favorite or effective prompts, organized by category, that can be inserted into the chat with one click.
+  * **[#112] Prompt Templates with Variables:** ✅ Create prompt templates with placeholders (e.g., "Summarize the following text for a {{audience}}: {{text_to_summarize}}"), The UI would then present fields for the user to fill in.
   * **[#117] Slash Commands:** Pre-defined shortcuts for common actions, like `/summarize` to summarize the last response, `/clear` to clear context, or `/system` to change the system prompt mid-conversation.
   * **[#119] Prompt History Dropdown:** A history of the last 20 prompts sent by the user, accessible via a dropdown or arrow keys in the input box.
   * **[#121] Character/Persona Gallery:** A pre-populated gallery of system prompts for different characters (e.g., "Shakespearean Poet," "Helpful Rubber Duck," "Expert C++ Developer") that can be activated with one click.
 * **UI Customization:**
   * **[#10] Customizable UI Fonts & Sizes:** In settings, allow the user to select the font family and font size for both the chat display and the input box, improving accessibility.
   * **[#166] Theme Editor/Importer:** A built-in editor to create and save custom QSS themes. Users could also import/export theme files to share them.
-  * **[#172] Keyboard Shortcut Editor:** Allow users to customize keyboard shortcuts for common actions like "New Chat," "Send Message," etc.
-  * **[#186] Compact vs. Spacious UI Mode:** A toggle in the View menu to adjust padding and margins for either a more dense, information-rich display or a more spacious, readable one.
+  * **[#172] Keyboard Shortcut Editor:** ✅ Allow users to customize keyboard shortcuts for common actions like "New Chat," "Send Message," etc.
+  * **[#186] Compact vs. Spacious UI Mode:** ✅ A toggle in the View menu to adjust padding and margins for either a more dense, information-rich display or a more spacious, readable one.
 
 ---
 
