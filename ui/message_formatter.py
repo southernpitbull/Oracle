@@ -19,18 +19,21 @@ class MessageFormatter:
         # Escape HTML to avoid rendering issues with raw text
         text = html.escape(text)
         
-        # Make URLs clickable
-        url_pattern = r'https?://(?:[-\w.])+(?:\:[0-9]+)?(?:/(?:[\w/_.])*(?:\?(?:[\w&=%.])*)?(?:\#(?:[\w.])*)?)?'
-        text = re.sub(url_pattern, r'<a href="\g<0>" style="color: #1F6FEB; text-decoration: underline;">\g<0></a>', text)
-        
         # Handle thinking blocks with collapsible thought bubble design
         text = self._format_thinking_blocks(text, current_model)
         
         # Enhanced code blocks with syntax highlighting and copy functionality
         text = self._format_code_blocks(text)
         
+        # Enhanced markdown formatting
+        text = self._format_markdown(text)
+        
         # Enhanced markdown table rendering
         text = self._format_tables(text)
+        
+        # Make URLs clickable (after other formatting to avoid conflicts)
+        url_pattern = r'https?://(?:[-\w.])+(?:\:[0-9]+)?(?:/(?:[\w/_.])*(?:\?(?:[\w&=%.])*)?(?:\#(?:[\w.])*)?)?'
+        text = re.sub(url_pattern, r'<a href="\g<0>" style="color: #1F6FEB; text-decoration: underline;">\g<0></a>', text)
         
         return text
     
@@ -250,8 +253,8 @@ class MessageFormatter:
     def _format_code_blocks(self, text):
         """Format code blocks with syntax highlighting"""
         def highlight_code(match):
-            lang = match.group(1) or 'text'
-            code = match.group(2)
+            lang = (match.group(1) or 'text').strip()
+            code = match.group(2).strip()
             
             # The code is already HTML-escaped, so we need to unescape it for the lexer
             code_to_highlight = html.unescape(code)
@@ -268,33 +271,64 @@ class MessageFormatter:
                 try:
                     lexer = get_lexer_by_name(lang, stripall=True)
                 except Exception:
-                    lexer = TextLexer()
+                    try:
+                        # Try common language aliases
+                        lang_map = {
+                            'js': 'javascript',
+                            'py': 'python',
+                            'ts': 'typescript',
+                            'sh': 'bash',
+                            'shell': 'bash',
+                            'yml': 'yaml'
+                        }
+                        mapped_lang = lang_map.get(lang.lower(), lang)
+                        lexer = get_lexer_by_name(mapped_lang, stripall=True)
+                    except Exception:
+                        lexer = TextLexer()
 
                 # Configure formatter with line numbers if enabled
                 if self.show_line_numbers:
                     formatter = HtmlFormatter(
-                        style='monokai', 
+                        style='monokai' if self.dark_theme else 'default', 
                         noclasses=True, 
                         linenos='inline',
                         linenostart=1,
                         linenospecial=0,
-                        linenumsep=' '
+                        linenumsep='  ',
+                        lineanchors='line',
+                        anchorlinenos=True
                     )
                 else:
-                    formatter = HtmlFormatter(style='monokai', noclasses=True)
+                    formatter = HtmlFormatter(
+                        style='monokai' if self.dark_theme else 'default', 
+                        noclasses=True
+                    )
                     
                 highlighted_code = highlight(code_to_highlight, lexer, formatter)
+                
+                # Clean up the highlighted code
+                if self.show_line_numbers:
+                    # Ensure line numbers are properly styled
+                    highlighted_code = re.sub(
+                        r'<span class="linenos">(\d+)</span>',
+                        r'<span style="color: #8B949E; margin-right: 1em; user-select: none; font-weight: normal;">\1</span>',
+                        highlighted_code
+                    )
             else:
                 # Fallback without syntax highlighting
+                code_bg = "#272822" if self.dark_theme else "#F6F8FA"
+                code_color = "#F8F8F2" if self.dark_theme else "#24292F"
+                line_color = "#8B949E"
+                
                 if self.show_line_numbers:
                     # Add line numbers manually for fallback
                     lines = code_to_highlight.split('\n')
                     numbered_lines = []
                     for i, line in enumerate(lines, 1):
-                        numbered_lines.append(f'<span style="color: #8B949E; margin-right: 1em; user-select: none;">{i:>3}</span>{html.escape(line)}')
-                    highlighted_code = f'<pre style="background-color: #272822; color: #f8f8f2; padding: 10px; border-radius: 4px; overflow-x: auto;"><code>{"<br>".join(numbered_lines)}</code></pre>'
+                        numbered_lines.append(f'<span style="color: {line_color}; margin-right: 1em; user-select: none;">{i:>3}</span>{html.escape(line)}')
+                    highlighted_code = f'<pre style="background-color: {code_bg}; color: {code_color}; padding: 10px; border-radius: 4px; overflow-x: auto; line-height: 1.4;"><code>{"<br>".join(numbered_lines)}</code></pre>'
                 else:
-                    highlighted_code = f'<pre style="background-color: #272822; color: #f8f8f2; padding: 10px; border-radius: 4px; overflow-x: auto;"><code>{html.escape(code_to_highlight)}</code></pre>'
+                    highlighted_code = f'<pre style="background-color: {code_bg}; color: {code_color}; padding: 10px; border-radius: 4px; overflow-x: auto; line-height: 1.4;"><code>{html.escape(code_to_highlight)}</code></pre>'
             
             # Apply code folding if enabled and sections were detected
             if self.enable_code_folding and foldable_sections:
@@ -309,75 +343,137 @@ class MessageFormatter:
             
             features_text = f" ({', '.join(features)})" if features else ""
             
+            # Theme-appropriate colors
+            if self.dark_theme:
+                header_bg = "#1e1e1e"
+                header_color = "#8B949E"
+                border_color = "#333"
+                button_bg = "#30363D"
+                button_border = "#373E47"
+                button_color = "#F0F6FC"
+                button_hover_bg = "#1F6FEB"
+                button_success_bg = "#238636"
+            else:
+                header_bg = "#f6f8fa"
+                header_color = "#656d76"
+                border_color = "#d1d9e0"
+                button_bg = "#f6f8fa"
+                button_border = "#d1d9e0"
+                button_color = "#24292f"
+                button_hover_bg = "#0969da"
+                button_success_bg = "#1a7f37"
+            
             # Create enhanced code block with copy button
             code_block_html = f'''
             <div style="
-                background-color: #272822; 
-                border: 1px solid #333; 
+                background-color: {"#272822" if self.dark_theme else "#f6f8fa"}; 
+                border: 1px solid {border_color}; 
                 border-radius: 8px; 
                 margin: 15px 0; 
                 position: relative;
                 overflow: hidden;
-                font-family: 'Courier New', Courier, monospace;
+                font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+                font-size: 13px;
             ">
                 <div style="
-                    background-color: #1e1e1e;
+                    background-color: {header_bg};
                     padding: 8px 12px;
-                    border-bottom: 1px solid #333;
+                    border-bottom: 1px solid {border_color};
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
                     font-size: 12px;
-                    color: #8B949E;
+                    color: {header_color};
                 ">
-                    <span style="font-weight: 600; text-transform: uppercase;">{lang}{features_text}</span>
-                    <button onclick="copyCode('{code_id}')" style="
-                        background-color: #30363D;
-                        border: 1px solid #373E47;
+                    <span style="font-weight: 600; text-transform: uppercase; font-family: system-ui;">{lang}{features_text}</span>
+                    <button onclick="copyCodeBlock('{code_id}')" style="
+                        background-color: {button_bg};
+                        border: 1px solid {button_border};
                         border-radius: 4px;
-                        color: #F0F6FC;
+                        color: {button_color};
                         padding: 4px 8px;
                         cursor: pointer;
                         font-size: 11px;
-                        transition: all 0.2s;
-                    " onmouseover="this.style.backgroundColor='#1F6FEB'; this.style.borderColor='#1F6FEB';" 
-                       onmouseout="this.style.backgroundColor='#30363D'; this.style.borderColor='#373E47';">
-                        📋 Copy Code
+                        font-family: system-ui;
+                        transition: all 0.2s ease;
+                    " onmouseover="this.style.backgroundColor='{button_hover_bg}'; this.style.borderColor='{button_hover_bg}'; this.style.color='#ffffff';" 
+                       onmouseout="this.style.backgroundColor='{button_bg}'; this.style.borderColor='{button_border}'; this.style.color='{button_color}';">
+                        📋 Copy
                     </button>
                 </div>
-                <div style="padding: 12px; overflow-x: auto;" id="code_{code_id}">
+                <div style="padding: 12px; overflow-x: auto; line-height: 1.4;" id="code_{code_id}">
                     {highlighted_code}
                 </div>
             </div>
             <script>
-                function copyCode(codeId) {{
+                function copyCodeBlock(codeId) {{
                     const codeElement = document.getElementById('code_' + codeId);
-                    const codeText = codeElement.innerText || codeElement.textContent;
-                    navigator.clipboard.writeText(codeText).then(() => {{
-                        // Visual feedback
-                        const button = event.target;
-                        const originalText = button.textContent;
-                        button.textContent = '✓ Copied!';
-                        button.style.backgroundColor = '#238636';
-                        setTimeout(() => {{
-                            button.textContent = originalText;
-                            button.style.backgroundColor = '#30363D';
-                        }}, 1500);
-                    }});
+                    let codeText = '';
+                    
+                    // Try to get the text content, stripping line numbers if present
+                    if (codeElement) {{
+                        const preElement = codeElement.querySelector('pre');
+                        if (preElement) {{
+                            // Clone the element to avoid modifying the original
+                            const clone = preElement.cloneNode(true);
+                            
+                            // Remove line number spans
+                            const lineNumbers = clone.querySelectorAll('span[style*="user-select: none"]');
+                            lineNumbers.forEach(span => span.remove());
+                            
+                            codeText = clone.textContent || clone.innerText || '';
+                        }} else {{
+                            codeText = codeElement.textContent || codeElement.innerText || '';
+                        }}
+                    }}
+                    
+                    if (navigator.clipboard && codeText.trim()) {{
+                        navigator.clipboard.writeText(codeText.trim()).then(() => {{
+                            // Visual feedback
+                            const button = event.target;
+                            const originalText = button.textContent;
+                            button.textContent = '✓ Copied!';
+                            button.style.backgroundColor = '{button_success_bg}';
+                            button.style.borderColor = '{button_success_bg}';
+                            button.style.color = '#ffffff';
+                            setTimeout(() => {{
+                                button.textContent = originalText;
+                                button.style.backgroundColor = '{button_bg}';
+                                button.style.borderColor = '{button_border}';
+                                button.style.color = '{button_color}';
+                            }}, 1500);
+                        }}).catch(() => {{
+                            // Fallback for older browsers
+                            const textArea = document.createElement('textarea');
+                            textArea.value = codeText.trim();
+                            document.body.appendChild(textArea);
+                            textArea.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(textArea);
+                            
+                            const button = event.target;
+                            const originalText = button.textContent;
+                            button.textContent = '✓ Copied!';
+                            setTimeout(() => {{
+                                button.textContent = originalText;
+                            }}, 1500);
+                        }});
+                    }}
                 }}
             </script>
             '''
             return code_block_html
 
-        # Regex to find ```lang\ncode``` blocks
-        text = re.sub(r'```(\w+)?\n(.*?)\n```', highlight_code, text, flags=re.DOTALL)
+        # Improved regex to handle code blocks with optional language and proper fencing
+        # This handles: ```lang\ncode\n``` and ```\ncode\n```
+        text = re.sub(r'```(\w+)?\s*\n(.*?)\n```', highlight_code, text, flags=re.DOTALL)
         
         return text
     
     def _format_tables(self, text):
-        """Format markdown tables"""
+        """Format markdown tables with enhanced styling"""
         def format_table(match):
-            table_text = match.group(0)
+            table_text = match.group(1)
             lines = table_text.strip().split('\n')
             
             if len(lines) < 2:
@@ -385,6 +481,8 @@ class MessageFormatter:
             
             # Parse header
             header = [cell.strip() for cell in lines[0].split('|') if cell.strip()]
+            if not header:
+                return table_text
             
             # Parse alignment row
             alignment_row = lines[1] if len(lines) > 1 else ""
@@ -398,25 +496,53 @@ class MessageFormatter:
                 else:
                     alignments.append('left')
             
+            # Ensure we have alignments for all columns
+            while len(alignments) < len(header):
+                alignments.append('left')
+            
             # Parse data rows
             data_rows = []
             for line in lines[2:]:
-                if line.strip():
-                    row = [cell.strip() for cell in line.split('|') if cell.strip()]
-                    data_rows.append(row)
+                if line.strip() and '|' in line:
+                    row = [cell.strip() for cell in line.split('|') if cell.strip() or cell.strip() == '']
+                    # Pad row to match header length
+                    while len(row) < len(header):
+                        row.append('')
+                    data_rows.append(row[:len(header)])  # Trim to header length
+            
+            if not data_rows:
+                return table_text
+            
+            # Theme-appropriate colors
+            if self.dark_theme:
+                table_bg = "#161B22"
+                header_bg = "#21262D"
+                border_color = "#373E47"
+                text_color = "#F0F6FC"
+                header_color = "#F0F6FC"
+                row_hover_bg = "#1C2128"
+            else:
+                table_bg = "#FFFFFF"
+                header_bg = "#F6F8FA"
+                border_color = "#D1D9E0"
+                text_color = "#24292F"
+                header_color = "#24292F"
+                row_hover_bg = "#F6F8FA"
             
             # Generate HTML table
-            table_html = '''
+            table_html = f'''
             <table style="
                 border-collapse: collapse;
                 width: 100%;
                 margin: 15px 0;
-                background-color: #161B22;
+                background-color: {table_bg};
                 border-radius: 8px;
                 overflow: hidden;
-                border: 1px solid #373E47;
+                border: 1px solid {border_color};
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 14px;
             ">
-                <thead style="background-color: #21262D;">
+                <thead style="background-color: {header_bg};">
                     <tr>
             '''
             
@@ -424,11 +550,12 @@ class MessageFormatter:
                 align = alignments[i] if i < len(alignments) else 'left'
                 table_html += f'''
                         <th style="
-                            padding: 12px;
+                            padding: 12px 16px;
                             text-align: {align};
                             font-weight: 600;
-                            color: #F0F6FC;
-                            border-bottom: 2px solid #373E47;
+                            color: {header_color};
+                            border-bottom: 2px solid {border_color};
+                            background-color: {header_bg};
                         ">{header_cell}</th>
                 '''
             
@@ -438,16 +565,18 @@ class MessageFormatter:
                 <tbody>
             '''
             
-            for row in data_rows:
-                table_html += '<tr>'
+            for row_idx, row in enumerate(data_rows):
+                stripe_bg = table_bg if row_idx % 2 == 0 else (row_hover_bg if self.dark_theme else "#FBFCFD")
+                table_html += f'<tr style="background-color: {stripe_bg};">'
                 for i, cell in enumerate(row):
                     align = alignments[i] if i < len(alignments) else 'left'
                     table_html += f'''
                         <td style="
-                            padding: 10px 12px;
+                            padding: 10px 16px;
                             text-align: {align};
-                            color: #F0F6FC;
-                            border-bottom: 1px solid #373E47;
+                            color: {text_color};
+                            border-bottom: 1px solid {border_color};
+                            vertical-align: top;
                         ">{cell}</td>
                     '''
                 table_html += '</tr>'
@@ -459,8 +588,92 @@ class MessageFormatter:
             
             return table_html
 
-        # Enhanced table detection - more robust pattern
-        table_pattern = r'(?:^|\n)(\|[^\n]+\|(?:\n\|[^\n]+\|)*)'
+        # Enhanced table detection - more robust pattern for markdown tables
+        # Match tables that start with | and have at least 2 rows (header + separator)
+        table_pattern = r'((?:^\|[^\n]*\|\s*\n){2,})'
         text = re.sub(table_pattern, format_table, text, flags=re.MULTILINE)
 
+        return text
+    
+    def _format_markdown(self, text):
+        """Format markdown elements like bold, italic, headers, lists, etc."""
+        # Handle headers (### ### text)
+        text = re.sub(r'^(#{1,6})\s*(.*?)$', 
+                     lambda m: f'<h{len(m.group(1))} style="color: {("#1F6FEB" if self.dark_theme else "#2B6CB0")}; margin: 15px 0 10px 0; font-weight: 600;">{m.group(2)}</h{len(m.group(1))}>', 
+                     text, flags=re.MULTILINE)
+        
+        # Handle bold text (**text** or __text__)
+        text = re.sub(r'\*\*(.*?)\*\*', r'<strong style="font-weight: 600; color: inherit;">\1</strong>', text)
+        text = re.sub(r'__(.*?)__', r'<strong style="font-weight: 600; color: inherit;">\1</strong>', text)
+        
+        # Handle italic text (*text* or _text_) - but not inside URLs or already formatted text
+        text = re.sub(r'(?<![\w*_])\*([^*]+?)\*(?![\w*_])', r'<em style="font-style: italic; color: inherit;">\1</em>', text)
+        text = re.sub(r'(?<![\w*_])_([^_]+?)_(?![\w*_])', r'<em style="font-style: italic; color: inherit;">\1</em>', text)
+        
+        # Handle strikethrough (~~text~~)
+        text = re.sub(r'~~(.*?)~~', r'<del style="text-decoration: line-through; color: #8B949E;">\1</del>', text)
+        
+        # Handle inline code (`code`) - but not if it's part of code blocks
+        text = re.sub(r'(?<!`)`([^`\n]+?)`(?!`)', 
+                     lambda m: f'<code style="background-color: {"#21262D" if self.dark_theme else "#F6F8FA"}; '
+                               f'color: {"#FF7B72" if self.dark_theme else "#D73A49"}; '
+                               f'padding: 2px 4px; border-radius: 3px; font-family: \'Courier New\', monospace; font-size: 0.9em;">{m.group(1)}</code>', 
+                     text)
+        
+        # Handle blockquotes (> text)
+        blockquote_bg = "#161B22" if self.dark_theme else "#F6F8FA"
+        blockquote_border = "#373E47" if self.dark_theme else "#D1D9E0"
+        blockquote_color = "#8B949E" if self.dark_theme else "#656D76"
+        
+        def format_blockquote(match):
+            quote_text = match.group(1).strip()
+            return f'''<blockquote style="
+                margin: 15px 0;
+                padding: 10px 15px;
+                background-color: {blockquote_bg};
+                border-left: 4px solid {blockquote_border};
+                border-radius: 0 6px 6px 0;
+                color: {blockquote_color};
+                font-style: italic;
+            ">{quote_text}</blockquote>'''
+        
+        text = re.sub(r'^>\s*(.*?)$', format_blockquote, text, flags=re.MULTILINE)
+        
+        # Handle unordered lists (- or * item)
+        list_color = "#F0F6FC" if self.dark_theme else "#24292F"
+        bullet_color = "#1F6FEB" if self.dark_theme else "#0969DA"
+        
+        def format_unordered_list(match):
+            items = match.group(0).strip().split('\n')
+            list_html = f'<ul style="margin: 10px 0; padding-left: 20px; color: {list_color};">'
+            for item in items:
+                if item.strip().startswith(('-', '*', '+')):
+                    item_text = item.strip()[1:].strip()
+                    list_html += f'<li style="margin: 5px 0; list-style-type: none; position: relative;"><span style="color: {bullet_color}; position: absolute; left: -15px;">•</span>{item_text}</li>'
+            list_html += '</ul>'
+            return list_html
+        
+        # Match multiple lines starting with - or * or +
+        text = re.sub(r'^((?:[-*+]\s+.*\n?)+)', format_unordered_list, text, flags=re.MULTILINE)
+        
+        # Handle ordered lists (1. item)
+        def format_ordered_list(match):
+            items = match.group(0).strip().split('\n')
+            list_html = f'<ol style="margin: 10px 0; padding-left: 20px; color: {list_color};">'
+            for item in items:
+                if re.match(r'^\d+\.\s+', item.strip()):
+                    item_text = re.sub(r'^\d+\.\s+', '', item.strip())
+                    list_html += f'<li style="margin: 5px 0; color: {bullet_color};">{item_text}</li>'
+            list_html += '</ol>'
+            return list_html
+        
+        # Match multiple lines starting with numbers
+        text = re.sub(r'^((?:\d+\.\s+.*\n?)+)', format_ordered_list, text, flags=re.MULTILINE)
+        
+        # Handle horizontal rules (--- or ***)
+        hr_color = "#373E47" if self.dark_theme else "#D1D9E0"
+        text = re.sub(r'^(---+|\*\*\*+)$', 
+                     f'<hr style="border: none; height: 2px; background-color: {hr_color}; margin: 20px 0;">', 
+                     text, flags=re.MULTILINE)
+        
         return text

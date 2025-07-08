@@ -1102,9 +1102,12 @@ class ChatApp(QMainWindow):
                 border: 2px solid #4A5568;
                 border-radius: 12px;
                 padding: 15px;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                font-family: 'Segoe UI', system-ui, sans-serif;
                 font-size: 14px;
-                line-height: 1.5;
+                line-height: 1.6;
+                color: #F7FAFC;
+                selection-background-color: #4A5568;
+                selection-color: #F7FAFC;
             }
             
             QTextEdit {
@@ -1311,9 +1314,12 @@ class ChatApp(QMainWindow):
                 border: 2px solid #E2E8F0;
                 border-radius: 12px;
                 padding: 15px;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                font-family: 'Segoe UI', system-ui, sans-serif;
                 font-size: 14px;
-                line-height: 1.5;
+                line-height: 1.6;
+                color: #1A202C;
+                selection-background-color: #E2E8F0;
+                selection-color: #1A202C;
             }
             
             QPushButton {
@@ -1565,7 +1571,7 @@ class ChatApp(QMainWindow):
             delattr(self, 'current_response')
 
     def append_to_chat(self, role, content, is_user=True):
-        """Append message to chat display (threaded and pin support)"""
+        """Append message to chat display with proper theming and formatting"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         
         # Format the message content using MessageFormatter for better code block rendering
@@ -1583,38 +1589,67 @@ class ChatApp(QMainWindow):
         if self.current_conversation_id in self.pinned_messages and idx in self.pinned_messages[self.current_conversation_id]:
             pin_html = " <span style='color:#FFD700;'>📌</span>"
         
-        if is_user:
-            message_html = f"""
-            <div class="user-message" style="
-                background: linear-gradient(135deg, #2D3748 0%, #4A5568 100%);
-                border: 1px solid #718096;
-                border-radius: 10px;
-                padding: 12px 16px;
-                margin: 10px 0;
-                color: #F7FAFC;
-            ">
-                <div style="font-weight: bold; color: #63B3ED; margin-bottom: 5px;">
-                    👤 User ({timestamp}){pin_html}
-                </div>
-                <div style="line-height: 1.5;">{formatted_content}</div>
-            </div>
-            """
+        # Theme-appropriate colors
+        if self.dark_theme:
+            if is_user:
+                bg_gradient = "linear-gradient(135deg, #2D3748 0%, #4A5568 100%)"
+                border_color = "#718096"
+                text_color = "#F7FAFC"
+                name_color = "#63B3ED"
+                icon = "👤"
+            else:
+                bg_gradient = "linear-gradient(135deg, #1A202C 0%, #2D3748 100%)"
+                border_color = "#4A5568"
+                text_color = "#F7FAFC"
+                name_color = "#48BB78"
+                icon = "🤖"
         else:
-            message_html = f"""
-            <div class="assistant-message" style="
-                background: linear-gradient(135deg, #1A202C 0%, #2D3748 100%);
-                border: 1px solid #4A5568;
-                border-radius: 10px;
-                padding: 12px 16px;
-                margin: 10px 0;
-                color: #F7FAFC;
+            if is_user:
+                bg_gradient = "linear-gradient(135deg, #E2E8F0 0%, #CBD5E0 100%)"
+                border_color = "#A0AEC0"
+                text_color = "#1A202C"
+                name_color = "#3182CE"
+                icon = "👤"
+            else:
+                bg_gradient = "linear-gradient(135deg, #F7FAFC 0%, #EDF2F7 100%)"
+                border_color = "#E2E8F0"
+                text_color = "#1A202C"
+                name_color = "#38A169"
+                icon = "🤖"
+        
+        message_html = f"""
+        <div class="{'user' if is_user else 'assistant'}-message" style="
+            background: {bg_gradient};
+            border: 1px solid {border_color};
+            border-radius: 12px;
+            padding: 14px 18px;
+            margin: 12px 0;
+            color: {text_color};
+            box-shadow: 0 2px 8px rgba(0, 0, 0, {'0.3' if self.dark_theme else '0.1'});
+            position: relative;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        ">
+            <div style="
+                font-weight: 600; 
+                color: {name_color}; 
+                margin-bottom: 8px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 14px;
             ">
-                <div style="font-weight: bold; color: #48BB78; margin-bottom: 5px;">
-                    🤖 {role} ({timestamp}){pin_html}
-                </div>
-                <div style="line-height: 1.5;">{formatted_content}</div>
+                <span style="font-size: 16px;">{icon}</span>
+                <span>{role.title()} ({timestamp})</span>
+                {pin_html}
             </div>
-            """
+            <div style="
+                line-height: 1.6;
+                font-size: 14px;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            ">{formatted_content}</div>
+        </div>
+        """
         
         cursor.insertHtml(message_html)
         
@@ -2179,28 +2214,88 @@ class ChatApp(QMainWindow):
             logger.error(f"Error exporting chat: {e}")
 
     def _export_to_json(self, file_path):
-        """Export chat to JSON format"""
+        """Export chat to JSON format with proper structure"""
         chat_data = {
-            "timestamp": datetime.now().isoformat(),
-            "provider": self.current_provider,
-            "model": self.current_model,
-            "conversation_id": self.current_conversation_id,
+            "metadata": {
+                "export_timestamp": datetime.now().isoformat(),
+                "export_version": "2.0",
+                "application": "The Oracle",
+                "provider": self.current_provider,
+                "model": self.current_model,
+                "conversation_id": self.current_conversation_id,
+                "total_messages": len(self.chat_history)
+            },
+            "conversation": {
+                "id": self.current_conversation_id,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "settings": {
+                    "provider": self.current_provider,
+                    "model": self.current_model,
+                    "system_prompt": getattr(self, 'system_prompt', ''),
+                    "temperature": getattr(self, 'temperature', 0.7),
+                    "max_tokens": getattr(self, 'max_tokens', 2048)
+                }
+            },
             "messages": []
         }
         
-        for entry in self.chat_history:
+        # Process chat history with proper message structure
+        for i, entry in enumerate(self.chat_history):
             if isinstance(entry, dict):
-                chat_data["messages"].append(entry)
+                message = {
+                    "id": entry.get("id", f"msg_{i}"),
+                    "role": entry.get("role", "unknown"),
+                    "content": entry.get("content", ""),
+                    "timestamp": entry.get("timestamp", datetime.now().isoformat()),
+                    "metadata": {
+                        "index": i,
+                        "word_count": len(entry.get("content", "").split()),
+                        "char_count": len(entry.get("content", "")),
+                        "model": entry.get("model", self.current_model),
+                        "provider": entry.get("provider", self.current_provider)
+                    }
+                }
+                
+                # Add any additional metadata
+                if "thinking" in entry:
+                    message["metadata"]["thinking"] = entry["thinking"]
+                if "finish_reason" in entry:
+                    message["metadata"]["finish_reason"] = entry["finish_reason"]
+                if "usage" in entry:
+                    message["metadata"]["usage"] = entry["usage"]
+                
+                chat_data["messages"].append(message)
             else:
                 # Handle legacy format
-                chat_data["messages"].append({
+                message = {
+                    "id": f"legacy_msg_{i}",
                     "role": "unknown",
                     "content": str(entry),
-                    "timestamp": datetime.now().isoformat()
-                })
+                    "timestamp": datetime.now().isoformat(),
+                    "metadata": {
+                        "index": i,
+                        "legacy_format": True,
+                        "word_count": len(str(entry).split()),
+                        "char_count": len(str(entry))
+                    }
+                }
+                chat_data["messages"].append(message)
+        
+        # Add conversation statistics
+        chat_data["statistics"] = {
+            "total_messages": len(chat_data["messages"]),
+            "user_messages": len([m for m in chat_data["messages"] if m["role"] == "user"]),
+            "assistant_messages": len([m for m in chat_data["messages"] if m["role"] == "assistant"]),
+            "system_messages": len([m for m in chat_data["messages"] if m["role"] == "system"]),
+            "total_words": sum(m["metadata"]["word_count"] for m in chat_data["messages"]),
+            "total_characters": sum(m["metadata"]["char_count"] for m in chat_data["messages"])
+        }
         
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(chat_data, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Exported conversation with {len(chat_data['messages'])} messages to {file_path}")
 
     def _export_to_txt(self, file_path):
         """Export chat to plain text format"""
