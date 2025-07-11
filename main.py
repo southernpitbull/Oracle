@@ -17,9 +17,9 @@ import logging
 import json
 import webbrowser
 from datetime import datetime
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-                           QTextEdit, QScrollArea, QWidget, QFrame, QApplication, 
-                           QMessageBox, QInputDialog, QMenu, QListWidgetItem, 
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+                           QTextEdit, QScrollArea, QWidget, QFrame, QApplication,
+                           QMessageBox, QInputDialog, QMenu, QListWidgetItem,
                            QFileDialog, QCheckBox, QSpinBox, QComboBox, QTabWidget,
                            QGridLayout, QGroupBox, QSlider, QLineEdit, QSplitter)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl, QSettings, QSize
@@ -109,12 +109,12 @@ try:
     from api.settings import APISettingsDialog
     from utils.file_utils import *
     from utils.formatting import *
-    
+
     logger.info("Successfully imported all modules")
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     print(f"❌ Failed to import required modules: {e}")
-    
+
     # Show error and exit
     print("Please ensure all modules are properly installed.")
     sys.exit(1)
@@ -128,7 +128,7 @@ def setup_application():
     app.setApplicationVersion("2.0.0")
     app.setOrganizationName("TheOracle")
     app.setOrganizationDomain("theoracle.ai")
-    
+
     # Set application icon if available
     try:
         from PyQt6.QtGui import QIcon
@@ -137,11 +137,11 @@ def setup_application():
             app.setWindowIcon(QIcon(icon_path))
     except ImportError:
         pass
-    
+
     # Set default font
     font = QFont("Segoe UI", 10)
     app.setFont(font)
-    
+
     return app
 
 
@@ -149,24 +149,32 @@ def main():
     """Main entry point for The Oracle application"""
     try:
         logger.info("Starting The Oracle application...")
-        
-        # Check and install dependencies if needed
-        # check_and_install_dependencies()
-        
+
         # Set up the Qt application
         app = setup_application()
-        
+
+        # Show splash screen
+        from ui.splash_screen import show_splash_screen
+        splash, loading_thread = show_splash_screen()
+
+        # Process events to show splash screen
+        app.processEvents()
+
+        # Wait for loading to complete
+        loading_thread.wait()
+
         # Create main window with enhanced UI
         main_window = ChatApp()
-        
-        # Show the main window
+
+        # Hide splash screen and show main window
+        splash.finish(main_window)
         main_window.show()
-        
+
         logger.info("The Oracle application started successfully")
-        
+
         # Run the application
         sys.exit(app.exec())
-        
+
     except Exception as e:
         logger.error(f"Fatal error in main application: {e}")
         print(f"❌ Fatal error: {e}")

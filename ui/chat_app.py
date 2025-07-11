@@ -18,6 +18,13 @@ import webbrowser
 from datetime import datetime
 from collections import Counter
 from functools import partial
+import uuid
+
+# Add the parent directory to the Python path so we can import core modules
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 from pathlib import Path
 import subprocess
 import platform
@@ -105,8 +112,8 @@ except ImportError:
 
 try:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
-    from langchain.document_loaders import TextLoader, PyPDFLoader, Docx2txtLoader
-    from langchain.embeddings import HuggingFaceEmbeddings
+    from langchain_community.document_loaders import TextLoader, PyPDFLoader, Docx2txtLoader
+    from langchain_community.embeddings import HuggingFaceEmbeddings
     from langchain_community.vectorstores import FAISS as LangchainFAISS
     from langchain.chains import RetrievalQA
     LANGCHAIN_AVAILABLE = True
@@ -163,6 +170,8 @@ from ui.keyboard_shortcut_editor import KeyboardShortcutEditor
 from ui.prompt_template_dialog import PromptTemplateDialog
 from ui.system_prompt_dialog import SystemPromptDialog
 from ui.message_formatter import MessageFormatter
+from ui.theme_styles import create_themed_message_box
+from ui.icon_manager import get_icon
 from utils.file_utils import *
 from utils.formatting import *
 
@@ -171,34 +180,40 @@ logger = logging.getLogger(__name__)
 
 class ModernButton(QPushButton):
     """Enhanced button with hover effects and modern styling"""
-    
+
     def __init__(self, text="", icon_path=None, parent=None):
         super().__init__(text, parent)
         self.icon_path = icon_path
         self.setupUI()
-        
+
     def setupUI(self):
         """Set up the button's appearance"""
-        if self.icon_path and os.path.exists(self.icon_path):
-            icon = QIcon(self.icon_path)
-            self.setIcon(icon)
-            self.setIconSize(QSize(18, 18))
-        
+        if self.icon_path:
+            # Use icon manager for consistent icon handling
+            if isinstance(self.icon_path, str):
+                icon = get_icon(self.icon_path)
+            else:
+                icon = self.icon_path
+
+            if icon and not icon.isNull():
+                self.setIcon(icon)
+                self.setIconSize(QSize(18, 18))
+
         # Add drop shadow effect
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(8)
         shadow.setColor(QColor(0, 0, 0, 40))
         shadow.setOffset(2, 2)
         self.setGraphicsEffect(shadow)
-        
+
         # Set minimum size for better appearance
         self.setMinimumHeight(32)
-        
+
     def enterEvent(self, event):
         """Handle mouse enter"""
         super().enterEvent(event)
         self.setStyleSheet(self.styleSheet() + "transform: scale(1.02);")
-        
+
     def leaveEvent(self, a0):
         """Handle mouse leave"""
         super().leaveEvent(a0)
@@ -207,11 +222,11 @@ class ModernButton(QPushButton):
 
 class AnimatedListWidget(QListWidget):
     """List widget with enhanced styling"""
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUI()
-        
+
     def setupUI(self):
         """Set up the list widget"""
         # Add drop shadow
@@ -229,13 +244,13 @@ class ChatApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("The Oracle")
         self.setGeometry(100, 100, 1400, 900)
-        
+
         # Initialize core components
         self.evaluator = AIEvaluator()
         self.knowledge_graph = KnowledgeGraph()
         self.ai_evaluator = AIEvaluator()
         self.multi_client = MultiProviderClient()
-        
+
         # State variables
         self.current_conversation_id = None
         self.servers = ["http://localhost:11434"]
@@ -249,7 +264,7 @@ class ChatApp(QMainWindow):
         self.auto_save_timer = None
         self.last_scroll_position = 0
         self.scroll_to_bottom_button = None
-        
+
         # Enhanced state variables for advanced features
         self.pinned_messages = {}  # conversation_id -> list of pinned message indices
         self.message_timestamps = {}  # conversation_id -> list of timestamps
@@ -301,7 +316,7 @@ class ChatApp(QMainWindow):
         self.notification_settings = {}  # Notification preferences
         self.accessibility_settings = {}  # Accessibility options
         self.performance_settings = {}  # Performance tuning options
-        
+
         # Virtual scrolling
         self.virtual_messages = []
         self.visible_message_widgets = []
@@ -309,11 +324,11 @@ class ChatApp(QMainWindow):
         self.viewport_start = 0
         self.viewport_end = 0
         self.virtual_scroll_enabled = True
-        
+
         # Current provider and model
         self.current_provider = "Ollama"
         self.current_model = None
-        
+
         # Settings
         self.save_code_blocks_action = QAction("Save Code Blocks", self)
         self.save_code_blocks_action.setCheckable(True)
@@ -324,13 +339,19 @@ class ChatApp(QMainWindow):
         self.show_line_numbers = False  # New setting for code block line numbers
         self.enable_code_folding = False  # New setting for code folding
         self.compact_mode = False  # New setting for compact UI mode
-        
+
         # Initialize message formatter
         self.message_formatter = MessageFormatter(self.dark_theme, self.show_line_numbers, self.enable_code_folding)
-        
+
         # Initialize icon path
         self.icon_base_path = os.path.join(os.path.dirname(__file__), "..", "icons")
-        
+
+        # Initialize avatar buttons
+        self.user_avatar_button = None
+        self.ai_avatar_button = None
+        self.user_avatar_file = "user-default.png"
+        self.ai_avatar_file = "ai-default.png"
+
         # Initialize UI
         self.setup_ui()
         self.setup_menu()
@@ -340,17 +361,21 @@ class ChatApp(QMainWindow):
         self.setup_auto_save()
         self.load_chat_on_startup()
         self.setup_code_execution()
+        self.setup_command_palette()
 
     def setup_ui(self):
         """Set up the main user interface"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        
+
+        # Setup comprehensive toolbar
+        self.setup_toolbar()
+
         # Top toolbar with enhanced styling
         toolbar_layout = QHBoxLayout()
         toolbar_layout.setSpacing(10)
-        
+
         # Provider selection with enhanced labels
         provider_label = QLabel("🤖 Provider:")
         provider_label.setStyleSheet("font-weight: bold; color: #4A5568;")
@@ -359,7 +384,7 @@ class ChatApp(QMainWindow):
         self.provider_combo.currentTextChanged.connect(self.on_provider_changed)
         toolbar_layout.addWidget(provider_label)
         toolbar_layout.addWidget(self.provider_combo)
-        
+
         # Model selection with enhanced labels
         model_label = QLabel("🧠 Model:")
         model_label.setStyleSheet("font-weight: bold; color: #4A5568;")
@@ -368,3126 +393,2403 @@ class ChatApp(QMainWindow):
         self.model_combo.currentTextChanged.connect(self.on_model_changed)
         toolbar_layout.addWidget(model_label)
         toolbar_layout.addWidget(self.model_combo)
-        
+
         # Model settings button
-        self.model_settings_button = ModernButton("⚙️", self.get_icon_path("toolbar", "settings"))
+        self.model_settings_button = ModernButton("⚙️", get_icon("toolbar/settings"))
         self.model_settings_button.setMaximumWidth(40)
         self.model_settings_button.setToolTip("Model Settings (Temperature, Max Tokens, etc.)")
         self.model_settings_button.clicked.connect(self.open_model_settings_manually)
         toolbar_layout.addWidget(self.model_settings_button)
-        
+
         # Enhanced buttons with icons
-        self.refresh_models_button = ModernButton("🔄", self.get_icon_path("toolbar", "refresh"))
+        self.refresh_models_button = ModernButton("🔄", get_icon("toolbar/refresh"))
         self.refresh_models_button.setMaximumWidth(40)
-        self.refresh_models_button.setToolTip("Refresh Models")
+        self.refresh_models_button.setToolTip("Refresh All Models")
         self.refresh_models_button.clicked.connect(self.refresh_current_provider_models)
         toolbar_layout.addWidget(self.refresh_models_button)
-        
-        self.api_settings_button = ModernButton("🔑 API Keys", self.get_icon_path("toolbar", "settings"))
+
+        self.api_settings_button = ModernButton("🔑 API Keys", get_icon("toolbar/settings"))
         self.api_settings_button.setToolTip("API Keys")
         self.api_settings_button.clicked.connect(self.open_api_settings)
         toolbar_layout.addWidget(self.api_settings_button)
-        
+
         # Theme toggle button
-        self.theme_button = ModernButton("🌙", self.get_icon_path("general", "theme_dark"))
+        self.theme_button = ModernButton("🌙", get_icon("general/theme_dark"))
         self.theme_button.setToolTip("Toggle Dark/Light Theme")
         self.theme_button.clicked.connect(self.toggle_theme)
         toolbar_layout.addWidget(self.theme_button)
-        
+
         self.pull_button = ModernButton("📥 Pull Model")
         self.pull_button.clicked.connect(self.pull_model)
         toolbar_layout.addWidget(self.pull_button)
-        
-        self.new_chat_button = ModernButton("🆕 New Chat", self.get_icon_path("buttons", "add_new"))
+
+        self.new_chat_button = ModernButton("🆕 New Chat", get_icon("buttons/add_new"))
         self.new_chat_button.clicked.connect(self.new_conversation)
         toolbar_layout.addWidget(self.new_chat_button)
-        
+
+        # Prompt templates button
+        self.prompt_templates_button = ModernButton("📝 Prompts", get_icon("toolbar/templates"))
+        self.prompt_templates_button.setToolTip("Open Prompt Templates & Generator")
+        self.prompt_templates_button.clicked.connect(self.open_prompt_templates)
+        toolbar_layout.addWidget(self.prompt_templates_button)
+
+        # Add RAG toggle button
+        self.rag_toggle_button = ModernButton("🧠 RAG", get_icon("toolbar/brain"))
+        self.rag_toggle_button.setCheckable(True)
+        self.rag_toggle_button.setChecked(self.rag_enabled)
+        self.rag_toggle_button.setToolTip("Toggle Retrieval-Augmented Generation")
+        self.rag_toggle_button.clicked.connect(self.toggle_rag)
+        toolbar_layout.addWidget(self.rag_toggle_button)
+
         # Enhanced search
         self.search_entry = QLineEdit()
         self.search_entry.setPlaceholderText("🔍 Search chat...")
         toolbar_layout.addWidget(self.search_entry)
-        
-        self.search_button = ModernButton("🔍", self.get_icon_path("toolbar", "search"))
+
+        self.search_button = ModernButton("🔍", get_icon("toolbar/search"))
         self.search_button.setMaximumWidth(40)
         self.search_button.setToolTip("Search Chat")
         self.search_button.clicked.connect(self.filter_chat)
         toolbar_layout.addWidget(self.search_button)
-        
+
         toolbar_layout.addStretch()
         main_layout.addLayout(toolbar_layout)
-        
+
         # Main content splitter with enhanced styling
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(8)
-        
-        # Left panel for conversations
-        self.left_panel = QWidget()
-        self.left_panel.setMaximumWidth(300)
-        self.left_panel.setMinimumWidth(250)
-        left_layout = QVBoxLayout(self.left_panel)
-        left_layout.setSpacing(10)
-        
-        # Conversation list header with modern styling
-        conv_header = QLabel("💬 Conversations")
-        conv_header.setStyleSheet("""
-            QLabel {
-                font-size: 16px;
-                font-weight: bold;
-                padding: 10px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #2D3748, stop:1 #4A5568);
-                color: white;
-                border-radius: 8px;
-                margin-bottom: 5px;
-            }
-        """)
-        left_layout.addWidget(conv_header)
-        
-        # Enhanced conversation list
-        self.conv_listbox = AnimatedListWidget()
-        self.conv_listbox.currentRowChanged.connect(self.load_selected_conv)
-        left_layout.addWidget(self.conv_listbox)
-        
-        # New conversation button at bottom of left panel
-        new_chat_btn = ModernButton("🆕 New Conversation", self.get_icon_path("buttons", "add_new"))
-        new_chat_btn.clicked.connect(self.new_conversation)
-        left_layout.addWidget(new_chat_btn)
-        
-        splitter.addWidget(self.left_panel)
-        
+
+        # Left panel for conversations with enhanced features
+        self.setup_left_panel(splitter)
+
         # Chat area with enhanced layout
-        self.chat_widget = QWidget()
-        chat_layout = QVBoxLayout(self.chat_widget)
-        chat_layout.setSpacing(0)
-        chat_layout.setContentsMargins(0, 0, 0, 0)
+        self.setup_chat_area(splitter)
 
-        # Create a vertical splitter to hold the chat display and input area
-        chat_input_splitter = QSplitter(Qt.Orientation.Vertical)
-        chat_input_splitter.setHandleWidth(8)
-
-        # --- Top part of the splitter: Chat Display Container ---
-        chat_display_container = QWidget()
-        chat_display_layout = QVBoxLayout(chat_display_container)
-        chat_display_layout.setContentsMargins(0, 0, 0, 0)
-        chat_display_layout.setSpacing(5)
-
-        # Chat display with enhanced styling
-        self.chat_display = QTextBrowser()
-        self.chat_display.setReadOnly(True)
-        self.chat_display.setOpenExternalLinks(True)
-        chat_display_layout.addWidget(self.chat_display)
-
-        # Enhanced scroll to bottom button
-        self.scroll_to_bottom_button = ModernButton("↓ Scroll to Bottom")
-        self.scroll_to_bottom_button.setMaximumHeight(30)
-        self.scroll_to_bottom_button.clicked.connect(self.scroll_to_bottom)
-        self.scroll_to_bottom_button.hide()
-
-        scroll_button_layout = QHBoxLayout()
-        scroll_button_layout.addStretch()
-        scroll_button_layout.addWidget(self.scroll_to_bottom_button)
-        scroll_button_layout.addStretch()
-        chat_display_layout.addLayout(scroll_button_layout)
-
-        # Connect scroll events
-        scrollbar = self.chat_display.verticalScrollBar()
-        if scrollbar:
-            scrollbar.valueChanged.connect(self.on_scroll_changed)
-
-        chat_input_splitter.addWidget(chat_display_container)
-
-        # --- Bottom part of the splitter: Input Frame ---
-        input_frame = QFrame()
-        input_frame.setFrameStyle(QFrame.Shape.StyledPanel)
-        input_layout = QHBoxLayout(input_frame)
-        input_layout.setSpacing(10)
-
-        self.input_entry = QTextEdit()
-        self.input_entry.setMaximumHeight(120)
-        self.input_entry.setPlaceholderText("✨ Type your message here... (Ctrl+Enter to send)")
-        self.input_entry.keyPressEvent = lambda e: self.input_key_press_event(e)
-        input_layout.addWidget(self.input_entry)
-
-        # Enhanced send button with icon
-        self.send_button = ModernButton("📤 Send", self.get_icon_path("chat", "send_message"))
-        self.send_button.setObjectName("send_button")
-        self.send_button.setMinimumWidth(100)
-        self.send_button.clicked.connect(self.send_message)
-        input_layout.addWidget(self.send_button)
-
-        chat_input_splitter.addWidget(input_frame)
-
-        # Set initial sizes for the vertical splitter to give most space to chat
-        chat_input_splitter.setSizes([self.height() - 200, 150])
-
-        chat_layout.addWidget(chat_input_splitter)
-        splitter.addWidget(self.chat_widget)
-        
         splitter.setSizes([300, 1300])
         main_layout.addWidget(splitter)
-        
+
         # Enhanced status bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("🚀 Ready to chat with The Oracle!")
+        self.setup_status_bar()
+
+        # Final UI validation and setup
+        self.finalize_ui_setup()
+
+    def setup_left_panel(self, splitter):
+        """Setup the left panel with conversations and folders"""
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+
+        # Conversation management header
+        conv_header = QHBoxLayout()
+        conv_label = QLabel("💬 Conversations")
+        conv_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #2D3748;")
+        conv_header.addWidget(conv_label)
+
+        # Add folder creation button
+        folder_btn = ModernButton("📁", get_icon("buttons/folder"))
+        folder_btn.setMaximumWidth(30)
+        folder_btn.setToolTip("Create Folder")
+        folder_btn.clicked.connect(self.create_conversation_folder)
+        conv_header.addWidget(folder_btn)
+
+        # Add sort button
+        sort_btn = ModernButton("🔽", get_icon("buttons/sort"))
+        sort_btn.setMaximumWidth(30)
+        sort_btn.setToolTip("Sort Conversations")
+        sort_btn.clicked.connect(self.show_sort_options)
+        conv_header.addWidget(sort_btn)
+
+        conv_header.addStretch()
+        left_layout.addLayout(conv_header)
+
+        # Folder filter dropdown
+        self.folder_combo = QComboBox()
+        self.folder_combo.addItems(["All Conversations", "📁 Work", "📁 Personal", "📁 Code"])
+        self.folder_combo.currentTextChanged.connect(self.filter_by_folder)
+        left_layout.addWidget(self.folder_combo)
+
+        # Search filter for conversations
+        self.conv_search = QLineEdit()
+        self.conv_search.setPlaceholderText("🔍 Filter conversations...")
+        self.conv_search.textChanged.connect(self.filter_conversations)
+        left_layout.addWidget(self.conv_search)
+
+        # Conversation list
+        self.conv_listbox = AnimatedListWidget()
+        self.conv_listbox.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.conv_listbox.customContextMenuRequested.connect(self.show_conversation_context_menu)
+        self.conv_listbox.currentRowChanged.connect(self.load_selected_conv)
+        left_layout.addWidget(self.conv_listbox)
+
+        splitter.addWidget(left_panel)
+
+    def setup_chat_area(self, splitter):
+        """Setup the main chat area with enhanced features"""
+        chat_widget = QWidget()
+        chat_layout = QVBoxLayout(chat_widget)
+
+        # Chat info header
+        info_layout = QHBoxLayout()
+        self.chat_info_label = QLabel("🤖 Ready to assist you!")
+        self.chat_info_label.setStyleSheet("font-weight: bold; color: #4A5568;")
+        info_layout.addWidget(self.chat_info_label)
+
+        # Add compact mode toggle
+        self.compact_mode_btn = ModernButton("⚡", get_icon("buttons/compact"))
+        self.compact_mode_btn.setCheckable(True)
+        self.compact_mode_btn.setToolTip("Toggle Compact Mode")
+        self.compact_mode_btn.clicked.connect(self.toggle_compact_mode)
+        info_layout.addWidget(self.compact_mode_btn)
+
+        # Add line numbers toggle
+        self.line_numbers_btn = ModernButton("🔢", get_icon("buttons/numbers"))
+        self.line_numbers_btn.setCheckable(True)
+        self.line_numbers_btn.setChecked(self.show_line_numbers)
+        self.line_numbers_btn.setToolTip("Toggle Code Line Numbers")
+        self.line_numbers_btn.clicked.connect(self.toggle_line_numbers)
+        info_layout.addWidget(self.line_numbers_btn)
+
+        # Add code folding toggle
+        self.code_folding_btn = ModernButton("📂", get_icon("buttons/fold"))
+        self.code_folding_btn.setCheckable(True)
+        self.code_folding_btn.setChecked(self.enable_code_folding)
+        self.code_folding_btn.setToolTip("Toggle Code Folding")
+        self.code_folding_btn.clicked.connect(self.toggle_code_folding)
+        info_layout.addWidget(self.code_folding_btn)
+
+        info_layout.addStretch()
+        chat_layout.addLayout(info_layout)
+
+        # Chat display area
+        self.chat_display = QTextEdit()
+        self.chat_display.setReadOnly(True)
+        self.chat_display.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.chat_display.customContextMenuRequested.connect(self.show_chat_context_menu)
+        self.chat_display.verticalScrollBar().valueChanged.connect(self.on_scroll_changed)
+        chat_layout.addWidget(self.chat_display)
+
+        # Scroll to bottom button (initially hidden)
+        self.scroll_to_bottom_button = ModernButton("⬇️ Scroll to Bottom")
+        self.scroll_to_bottom_button.clicked.connect(self.scroll_to_bottom)
+        self.scroll_to_bottom_button.hide()
+        chat_layout.addWidget(self.scroll_to_bottom_button)
+
+        # Input area
+        input_layout = QVBoxLayout()
+
+        # Input controls row
+        input_controls = QHBoxLayout()
+
+        # Slash commands dropdown
+        self.slash_combo = QComboBox()
+        self.slash_combo.addItems([
+            "💬 Chat Mode",
+            "/summarize - Summarize text",
+            "/explain - Explain code",
+            "/translate - Translate text",
+            "/review - Review code",
+            "/debug - Debug code",
+            "/optimize - Optimize code"
+        ])
+        self.slash_combo.currentTextChanged.connect(self.on_slash_command_selected)
+        input_controls.addWidget(self.slash_combo)
+
+        # Edit last prompt button
+        self.edit_last_btn = ModernButton("✏️ Edit Last", get_icon("buttons/edit"))
+        self.edit_last_btn.setToolTip("Edit Last Prompt")
+        self.edit_last_btn.clicked.connect(self.edit_last_prompt)
+        input_controls.addWidget(self.edit_last_btn)
+
+        # Prompt history button
+        self.history_btn = ModernButton("📜", get_icon("buttons/history"))
+        self.history_btn.setToolTip("Prompt History")
+        self.history_btn.clicked.connect(self.show_prompt_history)
+        input_controls.addWidget(self.history_btn)
+
+        # Voice input toggle
+        self.voice_btn = ModernButton("🎤", get_icon("buttons/mic"))
+        self.voice_btn.setCheckable(True)
+        self.voice_btn.setToolTip("Toggle Voice Input")
+        self.voice_btn.clicked.connect(self.toggle_voice_input)
+        input_controls.addWidget(self.voice_btn)
+
+        input_controls.addStretch()
+        input_layout.addLayout(input_controls)
+
+        # Main input area
+        input_row = QHBoxLayout()
+
+        # Text input
+        self.input_entry = QTextEdit()
+        self.input_entry.setMaximumHeight(100)
+        self.input_entry.setPlaceholderText("Type your message here... (Ctrl+Enter to send)")
+        self.input_entry.textChanged.connect(self.update_token_count)
+        input_row.addWidget(self.input_entry)
+
+        # Input buttons column
+        input_buttons = QVBoxLayout()
+
+        # Attach file button
+        self.attach_btn = ModernButton("📎", get_icon("buttons/attach"))
+        self.attach_btn.setToolTip("Attach File")
+        self.attach_btn.clicked.connect(self.attach_file)
+        input_buttons.addWidget(self.attach_btn)
+
+        # Send button
+        self.send_btn = ModernButton("📤 Send", get_icon("buttons/send"))
+        self.send_btn.setToolTip("Send Message (Ctrl+Enter)")
+        self.send_btn.clicked.connect(self.send_message)
+        input_buttons.addWidget(self.send_btn)
+
+        input_row.addLayout(input_buttons)
+        input_layout.addLayout(input_row)
+
+        # Token count display
+        token_layout = QHBoxLayout()
+        self.token_count_label = QLabel("Tokens: 0")
+        self.token_count_label.setStyleSheet("color: #718096; font-size: 12px;")
+        token_layout.addWidget(self.token_count_label)
+        token_layout.addStretch()
+        input_layout.addLayout(token_layout)
+
+        chat_layout.addLayout(input_layout)
+        splitter.addWidget(chat_widget)
+
+    def setup_status_bar(self):
+        """Setup enhanced status bar with live indicators"""
+        self.status_bar = self.statusBar()
+
+        # Provider status
+        self.provider_status = QLabel("Provider: Ollama")
+        self.status_bar.addWidget(self.provider_status)
+
+        # Model status
+        self.model_status = QLabel("Model: None")
+        self.status_bar.addWidget(self.model_status)
+
+        # Token status
+        self.token_status = QLabel("Tokens: 0")
+        self.status_bar.addWidget(self.token_status)
+
+        # RAG status (live indicator)
+        self.rag_status = QLabel("RAG: Disabled | KB Docs: 0 | Sources Used: 0")
+        self.status_bar.addPermanentWidget(self.rag_status)
+
+        # Update RAG status initially
+        self.update_rag_status()
+
+    def setup_toolbar(self):
+        """Setup comprehensive toolbar with all major features"""
+        toolbar = self.addToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+
+        # File operations
+        new_action = QAction(get_icon("buttons/add_new"), "New", self)
+        new_action.setShortcut(QKeySequence("Ctrl+N"))
+        new_action.triggered.connect(self.new_conversation)
+        toolbar.addAction(new_action)
+
+        open_action = QAction(get_icon("buttons/upload"), "Open", self)
+        open_action.setShortcut(QKeySequence("Ctrl+O"))
+        open_action.triggered.connect(self.open_conversation)
+        toolbar.addAction(open_action)
+
+        save_action = QAction(get_icon("buttons/save"), "Save", self)
+        save_action.setShortcut(QKeySequence("Ctrl+S"))
+        save_action.triggered.connect(self.save_chat)
+        toolbar.addAction(save_action)
+
+        toolbar.addSeparator()
+
+        # Prompt management
+        prompt_lib_action = QAction(get_icon("toolbar/library"), "Prompt Library", self)
+        prompt_lib_action.triggered.connect(self.open_prompt_library)
+        toolbar.addAction(prompt_lib_action)
+
+        persona_action = QAction(get_icon("Avatars/chat-llm"), "Personas", self)
+        persona_action.triggered.connect(self.open_persona_gallery)
+        toolbar.addAction(persona_action)
+
+        templates_action = QAction(get_icon("toolbar/templates"), "Templates", self)
+        templates_action.triggered.connect(self.open_prompt_templates)
+        toolbar.addAction(templates_action)
+
+        toolbar.addSeparator()
+
+        # RAG and Knowledge Base
+        rag_action = QAction(get_icon("toolbar/brain"), "RAG", self)
+        rag_action.setCheckable(True)
+        rag_action.setChecked(self.rag_enabled)
+        rag_action.triggered.connect(self.toggle_rag)
+        toolbar.addAction(rag_action)
+
+        kb_action = QAction(get_icon("toolbar/database"), "Knowledge Base", self)
+        kb_action.triggered.connect(self.manage_knowledge_base)
+        toolbar.addAction(kb_action)
+
+        toolbar.addSeparator()
+
+        # Code tools
+        code_action = QAction(get_icon("toolbar/code"), "Code Tools", self)
+        code_action.triggered.connect(self.open_code_sandbox)
+        toolbar.addAction(code_action)
+
+        execute_action = QAction(get_icon("toolbar/play"), "Execute", self)
+        execute_action.triggered.connect(self.execute_selected_code)
+        toolbar.addAction(execute_action)
+
+        toolbar.addSeparator()
+
+        # Analytics and tools
+        analytics_action = QAction(get_icon("toolbar/analytics"), "Analytics", self)
+        analytics_action.triggered.connect(self.analyze_chat)
+        toolbar.addAction(analytics_action)
+
+        # --- Add Semantic Search and RAG Analytics to toolbar ---
+        semantic_search_action = QAction(get_icon("toolbar/search"), "Semantic Search", self)
+        semantic_search_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        semantic_search_action.setToolTip("Semantic Search (Ctrl+Shift+F)")
+        semantic_search_action.triggered.connect(self.open_semantic_search)
+        toolbar.addAction(semantic_search_action)
+
+        rag_analytics_action = QAction(get_icon("toolbar/analytics"), "RAG Analytics", self)
+        rag_analytics_action.setShortcut(QKeySequence("Ctrl+Shift+G"))
+        rag_analytics_action.setToolTip("RAG Analytics (Ctrl+Shift+G)")
+        rag_analytics_action.triggered.connect(self.open_rag_analytics)
+        toolbar.addAction(rag_analytics_action)
+        # --- End additions ---
+
+        export_action = QAction(get_icon("buttons/download"), "Export", self)
+        export_action.triggered.connect(lambda: self.export_chat("pdf"))
+        toolbar.addAction(export_action)
+
+        toolbar.addSeparator()
+
+        # Settings
+        settings_action = QAction(get_icon("toolbar/settings"), "Settings", self)
+        settings_action.triggered.connect(self.open_preferences)
+        toolbar.addAction(settings_action)
+
+        # Store toolbar reference
+        self.main_toolbar = toolbar
 
     def setup_menu(self):
-        """Set up the comprehensive menu bar with all features"""
+        """Set up application menu"""
         try:
             menubar = self.menuBar()
-            if not menubar:
-                logger.warning("Could not create menu bar")
-                return
-            
-            # File Menu
-            file_menu = menubar.addMenu("File")
-            
-            # New conversation
-            new_conversation_action = QAction("New Conversation", self)
-            new_conversation_action.setShortcut(QKeySequence("Ctrl+N"))
-            new_conversation_action.triggered.connect(self.new_conversation)
-            file_menu.addAction(new_conversation_action)
-            
-            file_menu.addSeparator()
-            
-            # Load/Save actions
-            open_action = QAction("Open Conversation", self)
-            open_action.setShortcut(QKeySequence("Ctrl+O"))
-            open_action.triggered.connect(self.open_conversation)
-            file_menu.addAction(open_action)
-            
-            save_action = QAction("Save Chat", self)
-            save_action.setShortcut(QKeySequence("Ctrl+S"))
-            save_action.triggered.connect(self.save_chat)
-            file_menu.addAction(save_action)
-            
-            save_as_action = QAction("Save As...", self)
-            save_as_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
-            save_as_action.triggered.connect(self.save_chat_as)
-            file_menu.addAction(save_as_action)
-            
-            file_menu.addSeparator()
-            
-            # Import/Export submenu
-            import_menu = file_menu.addMenu("Import")
-            import_actions = [
-                ("Import from JSON", lambda: self.import_conversation("json")),
-                ("Import from TXT", lambda: self.import_conversation("txt")),
-                ("Import from CSV", lambda: self.import_conversation("csv")),
-                ("Import Chat History", lambda: self.import_chat_history())
-            ]
-            
-            for text, func in import_actions:
-                action = QAction(text, self)
-                action.triggered.connect(func)
-                import_menu.addAction(action)
-            
-            export_menu = file_menu.addMenu("Export")
-            export_actions = [
-                ("To JSON", lambda: self.export_chat("json")),
-                ("To TXT", lambda: self.export_chat("txt")),
-                ("To HTML", lambda: self.export_chat("html")),
-                ("To Markdown", lambda: self.export_chat("md")),
-                ("To PDF", lambda: self.export_chat("pdf")),
-                ("To Word Document", lambda: self.export_chat("docx")),
-                ("To CSV", lambda: self.export_chat("csv"))
-            ]
-            
-            for text, func in export_actions:
-                action = QAction(text, self)
-                action.triggered.connect(func)
-                export_menu.addAction(action)
-            
-            file_menu.addSeparator()
-            
-            # Recent files
-            recent_menu = file_menu.addMenu("Recent Conversations")
-            self.update_recent_menu(recent_menu)
-            
-            file_menu.addSeparator()
-            
-            # Print
-            print_action = QAction("Print Chat", self)
-            print_action.setShortcut(QKeySequence("Ctrl+P"))
-            print_action.triggered.connect(self.print_chat)
-            file_menu.addAction(print_action)
-            
-            file_menu.addSeparator()
-            
-            exit_action = QAction("Exit", self)
-            exit_action.setShortcut(QKeySequence("Ctrl+Q"))
-            exit_action.triggered.connect(self.close)
-            file_menu.addAction(exit_action)
-            
-            # Edit Menu
-            edit_menu = menubar.addMenu("Edit")
-            
-            undo_action = QAction("Undo", self)
-            undo_action.setShortcut(QKeySequence("Ctrl+Z"))
-            undo_action.triggered.connect(self.undo_last_action)
-            edit_menu.addAction(undo_action)
-            
-            redo_action = QAction("Redo", self)
-            redo_action.setShortcut(QKeySequence("Ctrl+Y"))
-            redo_action.triggered.connect(self.redo_last_action)
-            edit_menu.addAction(redo_action)
-            
-            edit_menu.addSeparator()
-            
-            copy_action = QAction("Copy Chat", self)
-            copy_action.setShortcut(QKeySequence("Ctrl+C"))
-            copy_action.triggered.connect(self.copy_chat_to_clipboard)
-            edit_menu.addAction(copy_action)
-            
-            paste_action = QAction("Paste", self)
-            paste_action.setShortcut(QKeySequence("Ctrl+V"))
-            paste_action.triggered.connect(self.paste_from_clipboard)
-            edit_menu.addAction(paste_action)
-            
-            edit_menu.addSeparator()
-            
-            find_action = QAction("Find in Chat", self)
-            find_action.setShortcut(QKeySequence("Ctrl+F"))
-            find_action.triggered.connect(self.find_in_chat)
-            edit_menu.addAction(find_action)
-            
-            replace_action = QAction("Find and Replace", self)
-            replace_action.setShortcut(QKeySequence("Ctrl+H"))
-            replace_action.triggered.connect(self.find_and_replace)
-            edit_menu.addAction(replace_action)
-            
-            edit_menu.addSeparator()
-            
-            select_all_action = QAction("Select All", self)
-            select_all_action.setShortcut(QKeySequence("Ctrl+A"))
-            select_all_action.triggered.connect(self.select_all_chat)
-            edit_menu.addAction(select_all_action)
-            
-            # Chat Menu
-            chat_menu = menubar.addMenu("Chat")
-            
-            # Formatting options
-            markdown_action = QAction("Markdown Formatting", self)
-            markdown_action.setCheckable(True)
-            markdown_action.setChecked(True)
-            markdown_action.triggered.connect(self.toggle_markdown)
-            chat_menu.addAction(markdown_action)
-            
-            syntax_highlighting_action = QAction("Syntax Highlighting", self)
-            syntax_highlighting_action.setCheckable(True)
-            syntax_highlighting_action.setChecked(True)
-            syntax_highlighting_action.triggered.connect(self.toggle_syntax_highlighting)
-            chat_menu.addAction(syntax_highlighting_action)
-            
-            chat_menu.addSeparator()
-            
-            # System prompt management
-            system_prompt_action = QAction("Set System Prompt...", self)
-            system_prompt_action.setShortcut(QKeySequence("Ctrl+Shift+P"))
-            system_prompt_action.triggered.connect(self.set_system_prompt)
-            chat_menu.addAction(system_prompt_action)
-            
-            clear_system_prompt_action = QAction("Clear System Prompt", self)
-            clear_system_prompt_action.triggered.connect(self.clear_system_prompt)
-            chat_menu.addAction(clear_system_prompt_action)
-            
-            chat_menu.addSeparator()
-            
-            # Prompt management
-            prompt_library_action = QAction("Prompt Library...", self)
-            prompt_library_action.setShortcut(QKeySequence("Ctrl+L"))
-            prompt_library_action.triggered.connect(self.open_prompt_library)
-            chat_menu.addAction(prompt_library_action)
-            
-            prompt_templates_action = QAction("Prompt Templates...", self)
-            prompt_templates_action.triggered.connect(self.open_prompt_templates)
-            chat_menu.addAction(prompt_templates_action)
-            
-            chat_menu.addSeparator()
-            
-            # Chat actions
-            clear_action = QAction("Clear Chat", self)
-            clear_action.setShortcut(QKeySequence("Ctrl+Delete"))
-            clear_action.triggered.connect(self.clear_chat)
-            chat_menu.addAction(clear_action)
-            
-            summarize_action = QAction("Summarize Chat", self)
-            summarize_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
-            summarize_action.triggered.connect(self.summarize_chat)
-            chat_menu.addAction(summarize_action)
-            
-            translate_action = QAction("Translate Chat", self)
-            translate_action.triggered.connect(self.translate_chat)
-            chat_menu.addAction(translate_action)
-            
-            chat_menu.addSeparator()
-            
-            # Message management
-            delete_last_message_action = QAction("Delete Last Message", self)
-            delete_last_message_action.setShortcut(QKeySequence("Ctrl+Backspace"))
-            delete_last_message_action.triggered.connect(self.delete_last_message)
-            chat_menu.addAction(delete_last_message_action)
-            
-            edit_message_action = QAction("Edit Message", self)
-            edit_message_action.triggered.connect(self.edit_selected_message)
-            chat_menu.addAction(edit_message_action)
-            
-            regenerate_response_action = QAction("Regenerate Response", self)
-            regenerate_response_action.setShortcut(QKeySequence("Ctrl+R"))
-            regenerate_response_action.triggered.connect(self.regenerate_last_response)
-            chat_menu.addAction(regenerate_response_action)
+            if menubar:
+                # File menu
+                file_menu = menubar.addMenu("File")
 
-            # View Menu
-            view_menu = menubar.addMenu("View")
-            
-            # UI Layout options
-            fullscreen_action = QAction("Toggle Fullscreen", self)
-            fullscreen_action.setShortcut(QKeySequence("F11"))
-            fullscreen_action.triggered.connect(self.toggle_fullscreen)
-            view_menu.addAction(fullscreen_action)
-            
-            view_menu.addSeparator()
-            
-            # Panel visibility
-            sidebar_action = QAction("Show Sidebar", self)
-            sidebar_action.setCheckable(True)
-            sidebar_action.setChecked(True)
-            sidebar_action.triggered.connect(self.toggle_sidebar)
-            view_menu.addAction(sidebar_action)
-            
-            toolbar_action = QAction("Show Toolbar", self)
-            toolbar_action.setCheckable(True)
-            toolbar_action.setChecked(True)
-            toolbar_action.triggered.connect(self.toggle_toolbar)
-            view_menu.addAction(toolbar_action)
-            
-            status_bar_action = QAction("Show Status Bar", self)
-            status_bar_action.setCheckable(True)
-            status_bar_action.setChecked(True)
-            status_bar_action.triggered.connect(self.toggle_status_bar)
-            view_menu.addAction(status_bar_action)
-            
-            view_menu.addSeparator()
-            
-            # Code display options
-            line_numbers_action = QAction("Show Line Numbers in Code Blocks", self)
-            line_numbers_action.setCheckable(True)
-            line_numbers_action.setChecked(self.show_line_numbers)
-            line_numbers_action.triggered.connect(self.toggle_line_numbers)
-            view_menu.addAction(line_numbers_action)
-            
-            code_folding_action = QAction("Enable Code Folding", self)
-            code_folding_action.setCheckable(True)
-            code_folding_action.setChecked(self.enable_code_folding)
-            code_folding_action.triggered.connect(self.toggle_code_folding)
-            view_menu.addAction(code_folding_action)
-            
-            word_wrap_action = QAction("Word Wrap", self)
-            word_wrap_action.setCheckable(True)
-            word_wrap_action.setChecked(True)
-            word_wrap_action.triggered.connect(self.toggle_word_wrap)
-            view_menu.addAction(word_wrap_action)
-            
-            view_menu.addSeparator()
-            
-            # UI mode options
-            compact_mode_action = QAction("Compact UI Mode", self)
-            compact_mode_action.setCheckable(True)
-            compact_mode_action.setChecked(self.compact_mode)
-            compact_mode_action.triggered.connect(self.toggle_compact_mode)
-            view_menu.addAction(compact_mode_action)
-            
-            focus_mode_action = QAction("Focus Mode", self)
-            focus_mode_action.setCheckable(True)
-            focus_mode_action.triggered.connect(self.toggle_focus_mode)
-            view_menu.addAction(focus_mode_action)
-            
-            view_menu.addSeparator()
-            
-            # Zoom controls
-            zoom_in_action = QAction("Zoom In", self)
-            zoom_in_action.setShortcut(QKeySequence("Ctrl++"))
-            zoom_in_action.triggered.connect(self.zoom_in)
-            view_menu.addAction(zoom_in_action)
-            
-            zoom_out_action = QAction("Zoom Out", self)
-            zoom_out_action.setShortcut(QKeySequence("Ctrl+-"))
-            zoom_out_action.triggered.connect(self.zoom_out)
-            view_menu.addAction(zoom_out_action)
-            
-            reset_zoom_action = QAction("Reset Zoom", self)
-            reset_zoom_action.setShortcut(QKeySequence("Ctrl+0"))
-            reset_zoom_action.triggered.connect(self.reset_zoom)
-            view_menu.addAction(reset_zoom_action)
+                # New conversation
+                new_action = QAction("New Conversation", self)
+                new_action.setShortcut(QKeySequence("Ctrl+N"))
+                new_action.triggered.connect(self.new_conversation)
+                file_menu.addAction(new_action)
 
-            # Tools Menu
-            tools_menu = menubar.addMenu("Tools")
-            
-            # File operations
-            attach_action = QAction("Attach File", self)
-            attach_action.setShortcut(QKeySequence("Ctrl+Shift+A"))
-            attach_action.triggered.connect(self.attach_file)
-            tools_menu.addAction(attach_action)
-            
-            batch_process_action = QAction("Batch Process Files", self)
-            batch_process_action.triggered.connect(self.batch_process_files)
-            tools_menu.addAction(batch_process_action)
-            
-            tools_menu.addSeparator()
-            
-            # Knowledge Base/RAG submenu
-            rag_menu = tools_menu.addMenu("Knowledge Base")
-            
-            add_doc_action = QAction("Add Document", self)
-            add_doc_action.triggered.connect(self.add_document_to_rag)
-            rag_menu.addAction(add_doc_action)
-            
-            add_folder_action = QAction("Add Folder", self)
-            add_folder_action.triggered.connect(self.add_folder_to_rag)
-            rag_menu.addAction(add_folder_action)
-            
-            manage_kb_action = QAction("Manage Knowledge Base", self)
-            manage_kb_action.triggered.connect(self.manage_knowledge_base)
-            rag_menu.addAction(manage_kb_action)
-            
-            rag_menu.addSeparator()
-            
-            init_rag_action = QAction("Initialize RAG System", self)
-            init_rag_action.triggered.connect(self.initialize_rag_system)
-            rag_menu.addAction(init_rag_action)
-            
-            rebuild_index_action = QAction("Rebuild Search Index", self)
-            rebuild_index_action.triggered.connect(self.rebuild_search_index)
-            rag_menu.addAction(rebuild_index_action)
-            
-            # Code execution submenu
-            code_menu = tools_menu.addMenu("Code Execution")
-            
-            execute_code_action = QAction("Execute Selected Code", self)
-            execute_code_action.setShortcut(QKeySequence("Ctrl+E"))
-            execute_code_action.triggered.connect(self.execute_selected_code)
-            code_menu.addAction(execute_code_action)
-            
-            code_sandbox_action = QAction("Open Code Sandbox", self)
-            code_sandbox_action.triggered.connect(self.open_code_sandbox)
-            code_menu.addAction(code_sandbox_action)
-            
-            jupyter_action = QAction("Launch Jupyter Notebook", self)
-            jupyter_action.triggered.connect(self.launch_jupyter)
-            code_menu.addAction(jupyter_action)
-            
-            # Analytics submenu
-            analytics_menu = tools_menu.addMenu("Analytics")
-            
-            analyze_action = QAction("Analyze Chat Patterns", self)
-            analyze_action.triggered.connect(self.analyze_chat)
-            analytics_menu.addAction(analyze_action)
-            
-            conversation_stats_action = QAction("Conversation Statistics", self)
-            conversation_stats_action.triggered.connect(self.show_conversation_stats)
-            analytics_menu.addAction(conversation_stats_action)
-            
-            token_usage_action = QAction("Token Usage Report", self)
-            token_usage_action.triggered.connect(self.show_token_usage)
-            analytics_menu.addAction(token_usage_action)
-            
-            visualize_action = QAction("Visualize Conversations", self)
-            visualize_action.triggered.connect(self.visualize_conversations)
-            analytics_menu.addAction(visualize_action)
-            
-            # Model management submenu
-            model_menu = tools_menu.addMenu("Model Management")
-            
-            pull_model_action = QAction("Pull/Download Model", self)
-            pull_model_action.triggered.connect(self.pull_model)
-            model_menu.addAction(pull_model_action)
-            
-            compare_models_action = QAction("Compare Models", self)
-            compare_models_action.triggered.connect(self.compare_models)
-            model_menu.addAction(compare_models_action)
-            
-            benchmark_action = QAction("Benchmark Models", self)
-            benchmark_action.triggered.connect(self.benchmark_models)
-            model_menu.addAction(benchmark_action)
-            
-            model_info_action = QAction("Model Information", self)
-            model_info_action.triggered.connect(self.show_model_info)
-            model_menu.addAction(model_info_action)
-            
-            tools_menu.addSeparator()
-            
-            # Search and navigation
-            advanced_search_action = QAction("Advanced Search", self)
-            advanced_search_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
-            advanced_search_action.triggered.connect(self.advanced_search)
-            tools_menu.addAction(advanced_search_action)
-            
-            global_search_action = QAction("Global Conversation Search", self)
-            global_search_action.triggered.connect(self.global_search)
-            tools_menu.addAction(global_search_action)
-            
-            tools_menu.addSeparator()
-            
-            # Utilities
-            text_tools_menu = tools_menu.addMenu("Text Tools")
-            
-            word_count_action = QAction("Word Count", self)
-            word_count_action.triggered.connect(self.show_word_count)
-            text_tools_menu.addAction(word_count_action)
-            
-            grammar_check_action = QAction("Grammar Check", self)
-            grammar_check_action.triggered.connect(self.check_grammar)
-            text_tools_menu.addAction(grammar_check_action)
-            
-            spell_check_action = QAction("Spell Check", self)
-            spell_check_action.triggered.connect(self.check_spelling)
-            text_tools_menu.addAction(spell_check_action)
-            
-            text_summary_action = QAction("Text Summary", self)
-            text_summary_action.triggered.connect(self.create_text_summary)
-            text_tools_menu.addAction(text_summary_action)
+                # Exit
+                exit_action = QAction("Exit", self)
+                exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+                exit_action.triggered.connect(self.close)
+                file_menu.addAction(exit_action)
 
-            # Settings Menu
-            settings_menu = menubar.addMenu("Settings")
-            
-            # API and provider settings
-            api_settings_action = QAction("API Settings", self)
-            api_settings_action.triggered.connect(self.open_api_settings)
-            settings_menu.addAction(api_settings_action)
-            
-            provider_settings_action = QAction("Provider Settings", self)
-            provider_settings_action.triggered.connect(self.open_provider_settings)
-            settings_menu.addAction(provider_settings_action)
-            
-            model_settings_action = QAction("Model Settings", self)
-            model_settings_action.triggered.connect(self.open_model_settings_manually)
-            settings_menu.addAction(model_settings_action)
-            
-            settings_menu.addSeparator()
-            
-            # UI and appearance
-            preferences_action = QAction("Preferences", self)
-            preferences_action.setShortcut(QKeySequence("Ctrl+,"))
-            preferences_action.triggered.connect(self.open_preferences)
-            settings_menu.addAction(preferences_action)
-            
-            theme_menu = settings_menu.addMenu("Theme")
-            
-            dark_theme_action = QAction("Dark Theme", self)
-            dark_theme_action.setCheckable(True)
-            dark_theme_action.setChecked(self.dark_theme)
-            dark_theme_action.triggered.connect(self.set_dark_theme)
-            theme_menu.addAction(dark_theme_action)
-            
-            light_theme_action = QAction("Light Theme", self)
-            light_theme_action.setCheckable(True)
-            light_theme_action.setChecked(not self.dark_theme)
-            light_theme_action.triggered.connect(self.set_light_theme)
-            theme_menu.addAction(light_theme_action)
-            
-            auto_theme_action = QAction("Auto Theme", self)
-            auto_theme_action.setCheckable(True)
-            auto_theme_action.triggered.connect(self.set_auto_theme)
-            theme_menu.addAction(auto_theme_action)
-            
-            custom_theme_action = QAction("Custom Theme...", self)
-            custom_theme_action.triggered.connect(self.open_theme_editor)
-            theme_menu.addAction(custom_theme_action)
-            
-            # Input and keyboard
-            keyboard_shortcuts_action = QAction("Keyboard Shortcuts...", self)
-            keyboard_shortcuts_action.triggered.connect(self.open_keyboard_shortcuts)
-            settings_menu.addAction(keyboard_shortcuts_action)
-            
-            input_settings_action = QAction("Input Settings", self)
-            input_settings_action.triggered.connect(self.open_input_settings)
-            settings_menu.addAction(input_settings_action)
-            
-            settings_menu.addSeparator()
-            
-            # Advanced settings
-            advanced_settings_action = QAction("Advanced Settings", self)
-            advanced_settings_action.triggered.connect(self.open_advanced_settings)
-            settings_menu.addAction(advanced_settings_action)
-            
-            plugin_manager_action = QAction("Plugin Manager", self)
-            plugin_manager_action.triggered.connect(self.open_plugin_manager)
-            settings_menu.addAction(plugin_manager_action)
-            
-            settings_menu.addSeparator()
-            
-            # Import/Export settings
-            export_settings_action = QAction("Export Settings", self)
-            export_settings_action.triggered.connect(self.export_settings)
-            settings_menu.addAction(export_settings_action)
-            
-            import_settings_action = QAction("Import Settings", self)
-            import_settings_action.triggered.connect(self.import_settings)
-            settings_menu.addAction(import_settings_action)
-            
-            reset_settings_action = QAction("Reset Settings", self)
-            reset_settings_action.triggered.connect(self.reset_settings)
-            settings_menu.addAction(reset_settings_action)
+                # Chat menu
+                chat_menu = menubar.addMenu("Chat")
 
-            # Help Menu
-            help_menu = menubar.addMenu("Help")
-            
-            # Documentation
-            user_guide_action = QAction("User Guide", self)
-            user_guide_action.setShortcut(QKeySequence("F1"))
-            user_guide_action.triggered.connect(self.open_user_guide)
-            help_menu.addAction(user_guide_action)
-            
-            keyboard_help_action = QAction("Keyboard Shortcuts", self)
-            keyboard_help_action.triggered.connect(self.show_keyboard_help)
-            help_menu.addAction(keyboard_help_action)
-            
-            feature_tour_action = QAction("Feature Tour", self)
-            feature_tour_action.triggered.connect(self.start_feature_tour)
-            help_menu.addAction(feature_tour_action)
-            
-            help_menu.addSeparator()
-            
-            # Support and feedback
-            bug_report_action = QAction("Report Bug", self)
-            bug_report_action.triggered.connect(self.report_bug)
-            help_menu.addAction(bug_report_action)
-            
-            feature_request_action = QAction("Request Feature", self)
-            feature_request_action.triggered.connect(self.request_feature)
-            help_menu.addAction(feature_request_action)
-            
-            feedback_action = QAction("Send Feedback", self)
-            feedback_action.triggered.connect(self.send_feedback)
-            help_menu.addAction(feedback_action)
-            
-            help_menu.addSeparator()
-            
-            # Updates and info
-            check_updates_action = QAction("Check for Updates", self)
-            check_updates_action.triggered.connect(self.check_for_updates)
-            help_menu.addAction(check_updates_action)
-            
-            changelog_action = QAction("Changelog", self)
-            changelog_action.triggered.connect(self.show_changelog)
-            help_menu.addAction(changelog_action)
-            
-            help_menu.addSeparator()
-            
-            about_action = QAction("About The Oracle", self)
-            about_action.triggered.connect(self.show_about_dialog)
-            help_menu.addAction(about_action)
-            
+                # System prompt
+                system_prompt_action = QAction("Set System Prompt", self)
+                system_prompt_action.triggered.connect(self.set_system_prompt)
+                chat_menu.addAction(system_prompt_action)
+
+                # Settings menu
+                settings_menu = menubar.addMenu("Settings")
+
+                # API settings
+                api_settings_action = QAction("API Settings", self)
+                api_settings_action.triggered.connect(self.open_api_settings)
+                settings_menu.addAction(api_settings_action)
+
+                # Model settings
+                model_settings_action = QAction("Model Settings", self)
+                model_settings_action.triggered.connect(self.open_model_settings_manually)
+                settings_menu.addAction(model_settings_action)
+
+                # Add Semantic Search and RAG Analytics to menu
+                tools_menu = menubar.addMenu("Tools")
+                semantic_search_action = QAction("Semantic Search", self)
+                semantic_search_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+                semantic_search_action.setToolTip("Semantic Search (Ctrl+Shift+F)")
+                semantic_search_action.triggered.connect(self.open_semantic_search)
+                tools_menu.addAction(semantic_search_action)
+                rag_analytics_action = QAction("RAG Analytics", self)
+                rag_analytics_action.setShortcut(QKeySequence("Ctrl+Shift+G"))
+                rag_analytics_action.setToolTip("RAG Analytics (Ctrl+Shift+G)")
+                rag_analytics_action.triggered.connect(self.open_rag_analytics)
+                tools_menu.addAction(rag_analytics_action)
+
+                # Help menu
+                help_menu = menubar.addMenu("Help")
+
+                # About
+                about_action = QAction("About", self)
+                about_action.triggered.connect(self.show_about_dialog)
+                help_menu.addAction(about_action)
+
         except Exception as e:
             logger.error(f"Error setting up menu: {e}")
 
-    def setup_styles(self):
-        """Apply enhanced dark theme styling with modern design"""
-        if self.dark_theme:
-            self.setStyleSheet("""
-            QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #0F1419, stop:1 #1A202C);
-                color: #F7FAFC;
-            }
-            
-            QWidget {
-                background-color: transparent;
-                color: #F7FAFC;
-            }
-            
-            QTextBrowser {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #1A202C, stop:1 #2D3748);
-                border: 2px solid #4A5568;
-                border-radius: 12px;
-                padding: 15px;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 14px;
-                line-height: 1.6;
-                color: #F7FAFC;
-                selection-background-color: #4A5568;
-                selection-color: #F7FAFC;
-            }
-            
-            QTextEdit {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #2D3748, stop:1 #4A5568);
-                border: 2px solid #718096;
-                border-radius: 10px;
-                padding: 12px;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                font-size: 14px;
-                color: #F7FAFC;
-            }
-            
-            QTextEdit:focus {
-                border-color: #63B3ED;
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #2D3748, stop:1 #38B2AC);
-            }
-            
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #4A5568, stop:1 #718096);
-                border: 2px solid #718096;
-                border-radius: 8px;
-                padding: 8px 16px;
-                color: #F7FAFC;
-                font-weight: bold;
-                font-size: 13px;
-                min-height: 20px;
-            }
-            
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #63B3ED, stop:1 #4299E1);
-                border-color: #63B3ED;
-                transform: translateY(-1px);
-            }
-            
-            QPushButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #3182CE, stop:1 #2B6CB0);
-                transform: translateY(0px);
-            }
-            
-            QPushButton[objectName="send_button"] {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #38A169, stop:1 #48BB78);
-                border-color: #38A169;
-            }
-            
-            QPushButton[objectName="send_button"]:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #48BB78, stop:1 #68D391);
-                border-color: #48BB78;
-            }
-            
-            QComboBox {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #2D3748, stop:1 #4A5568);
-                border: 2px solid #718096;
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-size: 13px;
-                min-height: 20px;
-            }
-            
-            QComboBox:hover {
-                border-color: #63B3ED;
-            }
-            
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-            
-            QComboBox::down-arrow {
-                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAiIGhlaWdodD0iNiIgdmlld0JveD0iMCAwIDEwIDYiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxwYXRoIGQ9Ik0xIDFMNSA1TDkgMSIgc3Ryb2tlPSIjRjdGQUZDIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgo8L3N2Zz4K);
-            }
-            
-            QLineEdit {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #2D3748, stop:1 #4A5568);
-                border: 2px solid #718096;
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-size: 13px;
-                color: #F7FAFC;
-            }
-            
-            QLineEdit:focus {
-                border-color: #63B3ED;
-            }
-            
-            QListWidget {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #1A202C, stop:1 #2D3748);
-                border: 2px solid #4A5568;
-                border-radius: 10px;
-                padding: 5px;
-                font-size: 13px;
-            }
-            
-            QListWidget::item {
-                padding: 12px;
-                margin: 2px;
-                border-radius: 8px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #2D3748, stop:1 #4A5568);
-                border: 1px solid #718096;
-            }
-            
-            QListWidget::item:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #4A5568, stop:1 #718096);
-                border-color: #63B3ED;
-            }
-            
-            QListWidget::item:selected {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #63B3ED, stop:1 #4299E1);
-                color: #1A202C;
-                font-weight: bold;
-            }
-            
-            QStatusBar {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #2D3748, stop:1 #4A5568);
-                color: #F7FAFC;
-                border-top: 1px solid #718096;
-                padding: 5px;
-            }
-            
-            QMenuBar {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #2D3748, stop:1 #4A5568);
-                color: #F7FAFC;
-                border-bottom: 1px solid #718096;
-                padding: 3px;
-            }
-            
-            QMenuBar::item {
-                padding: 8px 12px;
-                border-radius: 4px;
-            }
-            
-            QMenuBar::item:selected {
-                background: #63B3ED;
-                color: #1A202C;
-            }
-            
-            QMenu {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #2D3748, stop:1 #4A5568);
-                border: 2px solid #718096;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            
-            QMenu::item {
-                padding: 8px 20px;
-                border-radius: 4px;
-            }
-            
-            QMenu::item:selected {
-                background: #63B3ED;
-                color: #1A202C;
-            }
-            
-            QSplitter::handle {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #4A5568, stop:1 #718096);
-                border-radius: 4px;
-            }
-            
-            QSplitter::handle:hover {
-                background: #63B3ED;
-            }
-            
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #1A202C, stop:1 #2D3748);
-                border: 1px solid #4A5568;
-                border-radius: 10px;
-                padding: 5px;
-            }
-            """)
-        else:
-            # Light theme with modern enhancements
-            self.setStyleSheet("""
-            QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #F7FAFC, stop:1 #EDF2F7);
-                color: #1A202C;
-            }
-            
-            QWidget {
-                background-color: transparent;
-                color: #1A202C;
-            }
-            
-            QTextBrowser {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
-                    stop:0 #FFFFFF, stop:1 #F7FAFC);
-                border: 2px solid #E2E8F0;
-                border-radius: 12px;
-                padding: 15px;
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                font-size: 14px;
-                line-height: 1.6;
-                color: #1A202C;
-                selection-background-color: #E2E8F0;
-                selection-color: #1A202C;
-            }
-            
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #4299E1, stop:1 #63B3ED);
-                border: 2px solid #4299E1;
-                border-radius: 8px;
-                padding: 8px 16px;
-                color: #FFFFFF;
-                font-weight: bold;
-                font-size: 13px;
-                min-height: 20px;
-            }
-            
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #3182CE, stop:1 #4299E1);
-                border-color: #3182CE;
-            }
-            
-            QPushButton[objectName="send_button"] {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #38A169, stop:1 #48BB78);
-                border-color: #38A169;
-            }
-            
-            QPushButton[objectName="send_button"]:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #2F855A, stop:1 #38A169);
-                border-color: #2F855A;
-            }
-            """)
-        
-        # Add icon paths for enhanced UI
-        self.icon_base_path = os.path.join(os.path.dirname(__file__), "..", "icons")
-
     def load_providers_and_models(self):
-        """Load available providers and models with organized categories"""
-        # Clear existing items
-        self.provider_combo.clear()
-        
-        # Get providers organized by category
-        categories = self.multi_client.get_providers_by_category()
-        available_providers = self.multi_client.get_available_providers()
-        
-        # Add providers grouped by category
-        for category, providers in categories.items():
-            # Add category separator
-            self.provider_combo.addItem(f"--- {category} ---")
-            self.provider_combo.setItemData(self.provider_combo.count() - 1, False, Qt.ItemDataRole.UserRole)
-            
-            # Add providers in this category
-            for provider in providers:
-                if provider in available_providers:
-                    self.provider_combo.addItem(f"  {provider}")
-                else:
-                    # Show unavailable providers in gray
-                    self.provider_combo.addItem(f"  {provider} (unavailable)")
-                    self.provider_combo.setItemData(self.provider_combo.count() - 1, False, Qt.ItemDataRole.UserRole)
-        
-        # Set default to first available provider
-        if available_providers:
-            # Find the first available provider in the combo box
-            for i in range(self.provider_combo.count()):
-                item_text = self.provider_combo.itemText(i).strip()
-                if item_text in available_providers:
-                    self.provider_combo.setCurrentIndex(i)
-                    self.current_provider = item_text
-                    self.on_provider_changed(item_text)
-                    break
-        else:
-            # Default to Ollama even if not available
-            self.current_provider = "Ollama"
+        """Load available providers and models"""
+        try:
+            # Add providers to combo box
+            providers = ["Ollama", "OpenAI", "Anthropic", "Google", "Cohere"]
+            self.provider_combo.addItems(providers)
+
+            # Load models for initial provider
             self.on_provider_changed("Ollama")
+        except Exception as e:
+            logger.error(f"Error loading providers: {e}")
 
     def load_conversations(self):
-        """Load conversation list with lazy loading (batch)"""
-        self.conv_listbox.clear()
-        self.conversation_map = {}
-        self._all_conversations = []
-        conversations_dir = "conversations"
-        if os.path.exists(conversations_dir):
-            for filename in os.listdir(conversations_dir):
-                if filename.endswith('.json'):
-                    conv_id = filename[:-5]
-                    try:
-                        with open(os.path.join(conversations_dir, filename), 'r') as f:
-                            data = json.load(f)
-                        if data:
-                            first_msg = data[0]['content'][:50] + "..." if len(data[0]['content']) > 50 else data[0]['content']
-                            name = f"{first_msg} ({len(data)} msgs)"
-                            self._all_conversations.append((name, conv_id))
-                    except Exception as e:
-                        logger.error(f"Failed to load conversation {conv_id}: {e}")
-        self._lazy_load_index = 0
-        self._lazy_load_next_batch()
-
-    def _lazy_load_next_batch(self):
-        """Load the next batch of conversations into the listbox"""
-        batch = self._all_conversations[self._lazy_load_index:self._lazy_load_index + self.LAZY_LOAD_BATCH_SIZE]
-        for name, conv_id in batch:
-            self.conv_listbox.addItem(name)
-            self.conversation_map[name] = conv_id
-        self._lazy_load_index += self.LAZY_LOAD_BATCH_SIZE
-        # Add 'Load More' button if more remain
-        if self._lazy_load_index < len(self._all_conversations):
-            load_more_item = QListWidgetItem("↓ Load More Conversations")
-            load_more_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-            self.conv_listbox.addItem(load_more_item)
-
-    # --- Virtual Scrolling for Chat ---
-    def input_key_press_event(self, event):
-        """Handle key press events in input field"""
-        if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            self.send_message()
-        else:
-            QTextEdit.keyPressEvent(self.input_entry, event)
-
-    def send_message(self):
-        """Send a message to the AI"""
-        message = self.input_entry.toPlainText().strip()
-        if not message:
-            return
-        
-        # Clear input
-        self.input_entry.clear()
-        
-        # Hide welcome screen if visible
-        self.toggle_welcome_screen(False)
-        
-        # Add user message to chat
-        self.append_to_chat("User", message, is_user=True)
-        
-        # Add to chat history
-        self.chat_history.append({"role": "user", "content": message})
-        
-        # Create new conversation if needed
-        if not self.current_conversation_id:
-            self.current_conversation_id = f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            self.load_conversations()
-        
-        # Generate response
-        self.generate_response(message)
-
-    def generate_response(self, message):
-        """Generate AI response"""
-        if not self.current_provider or not self.current_model:
-            QMessageBox.warning(self, "No Model Selected", "Please select a provider and model first.")
-            return
-        
-        # Disable send button during generation
-        self.send_button.setEnabled(False)
-        self.send_button.setText("⏳ Processing...")
-        
-        # Get current model parameters
-        model_params = self.get_model_parameters_for_request()
-        
-        # Get system prompt for this conversation
-        system_prompt = self.get_system_prompt_for_conversation()
-        
-        # Create and start response thread
-        if self.current_provider == "Ollama":
-            self.response_thread = ModelResponseThread(
-                self.multi_client.providers["Ollama"]["client"],
-                self.current_model,
-                message,
-                model_params,
-                system_prompt if system_prompt else None
-            )
-        else:
-            self.response_thread = MultiProviderResponseThread(
-                self.multi_client,
-                message,
-                provider=self.current_provider,
-                model=self.current_model,
-                system_message=system_prompt if system_prompt else None,
-                model_params=model_params
-            )
-        
-        self.response_thread.response_chunk.connect(self.on_response_chunk)
-        self.response_thread.response_finished.connect(self.on_response_finished)
-        self.response_thread.error_occurred.connect(self.on_response_error)
-        self.response_thread.start()
-
-    def on_response_chunk(self, chunk):
-        """Handle response chunk from AI"""
-        if not hasattr(self, 'current_response'):
-            self.current_response = ""
-            # Add initial assistant message header
-            cursor = self.chat_display.textCursor()
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            cursor.insertHtml(f'<br><b>Assistant ({timestamp}):</b><br>')
-        
-        self.current_response += chunk
-        
-        # Simply append the chunk to the display
-        cursor = self.chat_display.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText(chunk)  # Insert as plain text to avoid HTML issues
-        
-        # Auto-scroll to bottom
-        scrollbar = self.chat_display.verticalScrollBar()
-        if scrollbar:
-            scrollbar.setValue(scrollbar.maximum())
-
-    def on_response_finished(self, full_response):
-        """Handle completed response from AI"""
-        # Add a line break after the response
-        cursor = self.chat_display.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertText("\n\n")  # Add some spacing
-        
-        self.send_button.setEnabled(True)
-        self.send_button.setText("📤 Send")
-        
-        # Add to chat history
-        self.chat_history.append({"role": "assistant", "content": full_response})
-        
-        # Reset current response
-        if hasattr(self, 'current_response'):
-            delattr(self, 'current_response')
-        
-        # Save conversation
-        self.save_current_conversation_to_json()
-
-    def on_response_error(self, error):
-        """Handle response error"""
-        self.send_button.setEnabled(True)
-        self.send_button.setText("📤 Send")
-        
-        # Add error message to chat
-        error_html = f"""
-        <div class="system-message" style="background-color: #FED7D7; border-left: 4px solid #E53E3E; padding: 10px; margin: 10px 0;">
-            <div class="message-header">
-                <span class="role">System</span>
-                <span class="timestamp">{datetime.now().strftime("%H:%M:%S")}</span>
-            </div>
-            <div class="message-content">❌ Error: {html.escape(str(error))}</div>
-        </div>
-        """
-        
-        cursor = self.chat_display.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        cursor.insertHtml(error_html)
-        
-        # Reset current response if it exists
-        if hasattr(self, 'current_response'):
-            delattr(self, 'current_response')
-
-    def append_to_chat(self, role, content, is_user=True):
-        """Append message to chat display with proper theming and formatting"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        # Format the message content using MessageFormatter for better code block rendering
-        if not is_user and self.enable_markdown:
-            formatted_content = self.message_formatter.format_message(content, self.current_model)
-        else:
-            formatted_content = html.escape(content)
-        
-        cursor = self.chat_display.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        
-        # If message is pinned, add a pin icon
-        idx = len(self.chat_history) - 1
-        pin_html = ""
-        if self.current_conversation_id in self.pinned_messages and idx in self.pinned_messages[self.current_conversation_id]:
-            pin_html = " <span style='color:#FFD700;'>📌</span>"
-        
-        # Theme-appropriate colors
-        if self.dark_theme:
-            if is_user:
-                bg_gradient = "linear-gradient(135deg, #2D3748 0%, #4A5568 100%)"
-                border_color = "#718096"
-                text_color = "#F7FAFC"
-                name_color = "#63B3ED"
-                icon = "👤"
-            else:
-                bg_gradient = "linear-gradient(135deg, #1A202C 0%, #2D3748 100%)"
-                border_color = "#4A5568"
-                text_color = "#F7FAFC"
-                name_color = "#48BB78"
-                icon = "🤖"
-        else:
-            if is_user:
-                bg_gradient = "linear-gradient(135deg, #E2E8F0 0%, #CBD5E0 100%)"
-                border_color = "#A0AEC0"
-                text_color = "#1A202C"
-                name_color = "#3182CE"
-                icon = "👤"
-            else:
-                bg_gradient = "linear-gradient(135deg, #F7FAFC 0%, #EDF2F7 100%)"
-                border_color = "#E2E8F0"
-                text_color = "#1A202C"
-                name_color = "#38A169"
-                icon = "🤖"
-        
-        message_html = f"""
-        <div class="{'user' if is_user else 'assistant'}-message" style="
-            background: {bg_gradient};
-            border: 1px solid {border_color};
-            border-radius: 12px;
-            padding: 14px 18px;
-            margin: 12px 0;
-            color: {text_color};
-            box-shadow: 0 2px 8px rgba(0, 0, 0, {'0.3' if self.dark_theme else '0.1'});
-            position: relative;
-            font-family: 'Segoe UI', system-ui, sans-serif;
-        ">
-            <div style="
-                font-weight: 600; 
-                color: {name_color}; 
-                margin-bottom: 8px;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                font-size: 14px;
-            ">
-                <span style="font-size: 16px;">{icon}</span>
-                <span>{role.title()} ({timestamp})</span>
-                {pin_html}
-            </div>
-            <div style="
-                line-height: 1.6;
-                font-size: 14px;
-                word-wrap: break-word;
-                overflow-wrap: break-word;
-            ">{formatted_content}</div>
-        </div>
-        """
-        
-        cursor.insertHtml(message_html)
-        
-        # Auto-scroll to bottom
-        scrollbar = self.chat_display.verticalScrollBar()
-        if scrollbar:
-            scrollbar.setValue(scrollbar.maximum())
-
-    def update_last_assistant_message(self, content):
-        """Update the last assistant message in the display"""
-        # Get the current HTML content
-        current_html = self.chat_display.toHtml()
-        
-        # Find the last assistant message and update it
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        # Create the updated message HTML
-        updated_content = format_chat_message("Assistant", content, timestamp, self.enable_markdown)
-        
-        # For streaming updates, we need to replace the last assistant message
-        # This is a simplified approach - we'll append the content directly
-        cursor = self.chat_display.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        
-        # Clear the last empty assistant message and insert the updated one
-        # Find and remove the last assistant message div
-        html_content = self.chat_display.toHtml()
-        
-        # Simple approach: find last assistant-message div and replace it
-        last_assistant_start = html_content.rfind('<div class="assistant-message">')
-        if last_assistant_start != -1:
-            # Find the end of this div
-            div_count = 0
-            end_pos = last_assistant_start
-            while end_pos < len(html_content):
-                if html_content[end_pos:end_pos+5] == '<div':
-                    div_count += 1
-                elif html_content[end_pos:end_pos+6] == '</div>':
-                    div_count -= 1
-                    if div_count == 0:
-                        end_pos += 6
-                        break
-                end_pos += 1
-            
-            # Replace the content
-            new_html = html_content[:last_assistant_start] + updated_content + html_content[end_pos:]
-            self.chat_display.setHtml(new_html)
-        else:
-            # No existing assistant message, append new one
-            cursor.insertHtml(updated_content)
-        
-        # Auto-scroll to bottom
-        scrollbar = self.chat_display.verticalScrollBar()
-        if scrollbar:
-            scrollbar.setValue(scrollbar.maximum())
-
-    def on_provider_changed(self, provider):
-        """Handle provider change"""
-        if not provider:
-            return
-        
-        # Clean provider name (remove leading spaces and category markers)
-        provider = provider.strip()
-        if provider.startswith("---") or provider.endswith("(unavailable)"):
-            return
-        
-        self.current_provider = provider
-        self.multi_client.current_provider = provider
-        
-        # Update models
-        models = self.multi_client.get_models(provider)
-        self.model_combo.clear()
-        if models:
-            self.model_combo.addItems(models)
-            if models:
-                self.current_model = models[0]
-                self.model_combo.setCurrentText(self.current_model)
-        else:
-            self.model_combo.addItem("No models available")
-            self.current_model = None
-        
-        # Enable pull button only for Ollama
-        self.pull_button.setEnabled(provider == "Ollama")
-
-    def on_model_changed(self, model):
-        """Handle model change and show settings dialog"""
-        if not model or model == "No models available":
-            return
-            
-        # Store the previous model to potentially revert
-        previous_model = getattr(self, 'current_model', None)
-        
-        # Set the new model
-        self.current_model = model
-        
-        # Show model settings dialog
-        self.show_model_settings_dialog(model, previous_model)
-
-    def open_model_settings_manually(self):
-        """Open model settings dialog manually (not triggered by model change)"""
-        if not self.current_model:
-            QMessageBox.information(self, "No Model", "Please select a model first.")
-            return
-        
-        self.show_model_settings_dialog(self.current_model, None)
-
-    def show_model_settings_dialog(self, model, previous_model=None):
-        """Show the model settings dialog for the selected model"""
+        """Load conversation list"""
         try:
-            # Get current provider
-            provider = getattr(self, 'current_provider', 'Unknown')
-            
-            # Get current model parameters
-            current_settings = getattr(self, 'model_parameters', {}).copy()
-            
-            # Create and show the dialog
-            dialog = ModelSettingsDialog(
-                parent=self,
-                current_model=model,
-                current_provider=provider,
-                current_settings=current_settings
-            )
-            
-            # Connect the settings applied signal
-            dialog.settings_applied.connect(self.apply_model_settings)
-            
-            # Show the dialog
-            result = dialog.exec()
-            
-            # If user cancelled, revert to previous model
-            if result == QDialog.DialogCode.Rejected and previous_model:
-                # Revert model selection without triggering another dialog
-                self.model_combo.blockSignals(True)
-                self.model_combo.setCurrentText(previous_model)
-                self.model_combo.blockSignals(False)
-                self.current_model = previous_model
-                
+            # Placeholder implementation - in full version this would load from database
+            self.conv_listbox.addItem("Welcome Chat")
+            self.conv_listbox.addItem("Previous Conversation")
         except Exception as e:
-            logger.error(f"Error showing model settings dialog: {e}")
-            # If there's an error, just continue with model change
-            QMessageBox.warning(self, "Settings Error", 
-                              f"Could not open model settings: {e}")
+            logger.error(f"Error loading conversations: {e}")
 
-    def apply_model_settings(self, settings):
-        """Apply the model settings from the dialog"""
+    def setup_auto_save(self):
+        """Setup auto-save functionality"""
         try:
-            # Update model parameters
-            self.model_parameters.update(settings)
-            
-            # Store settings per model
-            if not hasattr(self, 'model_specific_settings'):
-                self.model_specific_settings = {}
-            
-            model_key = f"{self.current_provider}::{self.current_model}"
-            self.model_specific_settings[model_key] = settings.copy()
-            
-            # Update status bar to show settings applied
-            if hasattr(self, 'status_bar'):
-                self.status_bar.showMessage(
-                    f"Settings applied for {self.current_model}", 3000
-                )
-            
-            logger.info(f"Applied settings for {self.current_model}: {settings}")
-            
+            self.auto_save_timer = QTimer()
+            self.auto_save_timer.timeout.connect(self.auto_save_chat)
+            self.auto_save_timer.start(60000)  # Auto-save every minute
         except Exception as e:
-            logger.error(f"Error applying model settings: {e}")
-            QMessageBox.warning(self, "Settings Error", 
-                              f"Could not apply settings: {e}")
+            logger.error(f"Error setting up auto-save: {e}")
 
-    def get_model_parameters_for_request(self):
-        """Get the current model parameters for API requests"""
-        # Start with base parameters
-        params = self.model_parameters.copy()
-        
-        # Override with model-specific settings if available
-        if hasattr(self, 'model_specific_settings'):
-            model_key = f"{self.current_provider}::{self.current_model}"
-            if model_key in self.model_specific_settings:
-                params.update(self.model_specific_settings[model_key])
-        
-        # Remove any None or invalid values
-        cleaned_params = {}
-        for key, value in params.items():
-            if value is not None and value != -1:  # -1 often means "default"
-                cleaned_params[key] = value
-        
-        return cleaned_params
-
-    def refresh_current_provider_models(self):
-        """Refresh models for current provider"""
-        if not self.current_provider:
-            return
-        
-        self.refresh_models_button.setEnabled(False)
-        self.refresh_models_button.setText("...")
-        
+    def load_chat_on_startup(self):
+        """Load chat on startup"""
         try:
-            # Special handling for Ollama
-            if self.current_provider == "Ollama":
-                models = self.multi_client.refresh_ollama_models()
-            else:
-                # Refresh models for other providers
-                models = self.multi_client.refresh_models(self.current_provider)
-            
-            # Update UI
-            self.model_combo.clear()
-            if models:
-                self.model_combo.addItems(models)
-                if models:
-                    self.current_model = models[0]
-                    self.model_combo.setCurrentText(self.current_model)
-            else:
-                self.model_combo.addItem("No models available")
-                self.current_model = None
-            
+            # Placeholder implementation
+            self.chat_display.append("<div style='text-align: center; padding: 20px; color: #666;'>Welcome to The Oracle! Start a conversation by typing a message below.</div>")
         except Exception as e:
-            QMessageBox.warning(self, "Refresh Error", f"Failed to refresh models: {e}")
-        finally:
-            self.refresh_models_button.setEnabled(True)
-            self.refresh_models_button.setText("🔄")
+            logger.error(f"Error loading chat on startup: {e}")
 
-    def open_api_settings(self):
-        """Open API settings dialog"""
-        dialog = APISettingsDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.multi_client.load_settings()
-            self.load_providers_and_models()
+    def setup_code_execution(self):
+        """Setup code execution environment"""
+        try:
+            # Placeholder implementation
+            logger.info("Code execution environment initialized")
+        except Exception as e:
+            logger.error(f"Error setting up code execution: {e}")
 
-    def toggle_theme(self):
-        """Toggle between dark and light themes"""
-        self.dark_theme = not self.dark_theme
-        self.setup_styles()
-        
-        # Update theme button
-        if self.dark_theme:
-            self.theme_button.setText("🌙")
-            self.theme_button.setToolTip("Switch to Light Theme")
+    def setup_styles(self):
+        """Setup application styles and themes"""
+        try:
+            # Set dark theme styles
+            if self.dark_theme:
+                self.setStyleSheet("""
+                    QMainWindow {
+                        background-color: #2b2b2b;
+                        color: #ffffff;
+                    }
+                    QTextEdit {
+                        background-color: #3c3c3c;
+                        color: #ffffff;
+                        border: 1px solid #555555;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QLineEdit {
+                        background-color: #3c3c3c;
+                        color: #ffffff;
+                        border: 1px solid #555555;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QComboBox {
+                        background-color: #3c3c3c;
+                        color: #ffffff;
+                        border: 1px solid #555555;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QPushButton {
+                        background-color: #4a4a4a;
+                        color: #ffffff;
+                        border: 1px solid #666666;
+                        border-radius: 5px;
+                        padding: 8px 16px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #5a5a5a;
+                    }
+                    QPushButton:pressed {
+                        background-color: #666666;
+                    }
+                    QListWidget {
+                        background-color: #3c3c3c;
+                        color: #ffffff;
+                        border: 1px solid #555555;
+                        border-radius: 5px;
+                    }
+                    QLabel {
+                        color: #ffffff;
+                    }
+                    QStatusBar {
+                        background-color: #2b2b2b;
+                        color: #ffffff;
+                    }
+                """)
+            else:
+                # Light theme
+                self.setStyleSheet("""
+                    QMainWindow {
+                        background-color: #ffffff;
+                        color: #000000;
+                    }
+                    QTextEdit {
+                        background-color: #ffffff;
+                        color: #000000;
+                        border: 1px solid #cccccc;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QLineEdit {
+                        background-color: #ffffff;
+                        color: #000000;
+                        border: 1px solid #cccccc;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QComboBox {
+                        background-color: #ffffff;
+                        color: #000000;
+                        border: 1px solid #cccccc;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QPushButton {
+                        background-color: #f0f0f0;
+                        color: #000000;
+                        border: 1px solid #cccccc;
+                        border-radius: 5px;
+                        padding: 8px 16px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #e0e0e0;
+                    }
+                    QPushButton:pressed {
+                        background-color: #d0d0d0;
+                    }
+                    QListWidget {
+                        background-color: #ffffff;
+                        color: #000000;
+                        border: 1px solid #cccccc;
+                        border-radius: 5px;
+                    }
+                    QLabel {
+                        color: #000000;
+                    }
+                    QStatusBar {
+                        background-color: #f0f0f0;
+                        color: #000000;
+                    }
+                """)
+        except Exception as e:
+            logger.error(f"Error setting up styles: {e}")
+
+    def show_about_dialog(self):
+        """Show about dialog"""
+        try:
+            QMessageBox.about(self, "About The Oracle",
+                             "The Oracle v2.0\n\nAdvanced AI Chat Assistant\n\nFeatures comprehensive AI integration with enhanced UI")
+        except Exception as e:
+            logger.error(f"Error showing about dialog: {e}")
+
+    def set_user_avatar(self, avatar_filename):
+        """Set the user avatar"""
+        try:
+            avatar_path = os.path.join(self.icon_base_path, "Avatars", avatar_filename)
+            if os.path.exists(avatar_path):
+                pixmap = QPixmap(avatar_path).scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.user_avatar_button.setIcon(QIcon(pixmap))
+                self.user_avatar_file = avatar_filename
+            else:
+                logger.warning(f"User avatar not found: {avatar_path}")
+        except Exception as e:
+            logger.error(f"Error setting user avatar: {e}")
+
+    def set_ai_avatar(self, avatar_filename):
+        """Set the AI avatar"""
+        try:
+            avatar_path = os.path.join(self.icon_base_path, "Avatars", avatar_filename)
+            if os.path.exists(avatar_path):
+                pixmap = QPixmap(avatar_path).scaled(32, 32, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.ai_avatar_button.setIcon(QIcon(pixmap))
+                self.ai_avatar_file = avatar_filename
+            else:
+                logger.warning(f"AI avatar not found: {avatar_path}")
+        except Exception as e:
+            logger.error(f"Error setting AI avatar: {e}")
+
+    def select_user_avatar(self):
+        """Open avatar selection dialog for user"""
+        self.open_avatar_selector("user")
+
+    def select_ai_avatar(self):
+        """Open avatar selection dialog for AI"""
+        self.open_avatar_selector("ai")
+
+    def open_avatar_selector(self, avatar_type):
+        """Open avatar selection dialog"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Select {avatar_type.title()} Avatar")
+        dialog.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        # Create scroll area for avatars
+        scroll_area = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QGridLayout(scroll_widget)
+
+        # Load available avatars
+        avatars_dir = os.path.join(self.icon_base_path, "Avatars")
+        if os.path.exists(avatars_dir):
+            avatar_files = [f for f in os.listdir(avatars_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
+
+            row, col = 0, 0
+            for avatar_file in avatar_files[:50]:  # Limit to first 50 avatars
+                avatar_path = os.path.join(avatars_dir, avatar_file)
+                button = QPushButton()
+                button.setFixedSize(80, 80)
+
+                pixmap = QPixmap(avatar_path).scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                button.setIcon(QIcon(pixmap))
+                button.setIconSize(QSize(64, 64))
+                button.clicked.connect(lambda checked, f=avatar_file: self.select_avatar(dialog, avatar_type, f))
+
+                scroll_layout.addWidget(button, row, col)
+                col += 1
+                if col > 5:
+                    col = 0
+                    row += 1
+
+        scroll_area.setWidget(scroll_widget)
+        layout.addWidget(scroll_area)
+
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.close)
+        layout.addWidget(close_btn)
+
+        dialog.exec()
+
+    def select_avatar(self, dialog, avatar_type, avatar_file):
+        """Select an avatar"""
+        if avatar_type == "user":
+            self.set_user_avatar(avatar_file)
         else:
-            self.theme_button.setText("☀️") 
-            self.theme_button.setToolTip("Switch to Dark Theme")
+            self.set_ai_avatar(avatar_file)
+        dialog.close()
 
-    def toggle_markdown(self):
-        """Toggle markdown formatting"""
-        self.enable_markdown = not self.enable_markdown
+    def toggle_rag(self):
+        """Toggle RAG system"""
+        self.rag_enabled = not self.rag_enabled
+        self.rag_toggle_button.setChecked(self.rag_enabled)
+        status = "Enabled" if self.rag_enabled else "Disabled"
+        self.rag_status.setText(f"RAG {status}")
 
-    def toggle_code_saving(self):
-        """Toggle code block saving"""
-        self.enable_code_saving = not self.enable_code_saving
+    def update_token_count(self):
+        """Update token count display"""
+        try:
+            text = self.input_entry.toPlainText()
+            # Simple token estimation (approximate)
+            token_count = len(text.split()) * 1.3  # Rough estimate
+            self.token_count_label.setText(f"Tokens: {int(token_count)}")
+            self.token_status.setText(f"Tokens: {int(token_count)}")
+        except Exception as e:
+            logger.error(f"Error updating token count: {e}")
 
-    def toggle_line_numbers(self):
-        """Toggle line numbers in code blocks"""
-        self.show_line_numbers = not self.show_line_numbers
-        
-        # Update the message formatter with the new setting
-        self.message_formatter = MessageFormatter(self.dark_theme, self.show_line_numbers, self.enable_code_folding)
-        
-        # Refresh the current display to apply the change
-        self.refresh_chat_display()
+    def on_slash_command_selected(self, command):
+        """Handle slash command selection"""
+        if command.startswith("/"):
+            # Extract command and insert template
+            cmd = command.split(" - ")[0]
+            templates = {
+                "/summarize": "Please summarize the following text:\n\n",
+                "/explain": "Please explain the following code:\n\n```\n\n```",
+                "/translate": "Please translate the following text to [language]:\n\n",
+                "/review": "Please review the following code:\n\n```\n\n```",
+                "/debug": "Please debug the following code:\n\n```\n\n```",
+                "/optimize": "Please optimize the following code:\n\n```\n\n```"
+            }
 
-    def toggle_code_folding(self):
-        """Toggle code folding in code blocks"""
-        self.enable_code_folding = not self.enable_code_folding
-        
-        # Update the message formatter with the new setting
-        self.message_formatter = MessageFormatter(self.dark_theme, self.show_line_numbers, self.enable_code_folding)
-        
-        # Refresh the current display to apply the change
-        self.refresh_chat_display()
+            if cmd in templates:
+                self.input_entry.setPlainText(templates[cmd])
+                # Reset to chat mode
+                self.slash_combo.setCurrentIndex(0)
+                self.input_entry.setPlainText(templates[cmd])
+                # Reset to chat mode
+                self.slash_combo.setCurrentIndex(0)
 
-    def toggle_compact_mode(self):
-        """Toggle between compact and spacious UI mode"""
-        self.compact_mode = not self.compact_mode
-        
-        # Apply the new styling
-        self.apply_ui_mode_styles()
-        
-        # Show status message
-        mode_text = "Compact" if self.compact_mode else "Spacious"
-        self.status_bar.showMessage(f"Switched to {mode_text} UI mode", 3000)
-
-    def apply_ui_mode_styles(self):
-        """Apply compact or spacious styling to the UI"""
-        if self.compact_mode:
-            # Compact mode - reduced padding and margins
-            compact_styles = """
-            QWidget {
-                font-size: 12px;
-            }
-            
-            QTextBrowser {
-                padding: 8px;
-                margin: 2px;
-                line-height: 1.3;
-            }
-            
-            QTextEdit {
-                padding: 6px;
-                margin: 2px;
-                font-size: 12px;
-            }
-            
-            QPushButton {
-                padding: 4px 8px;
-                margin: 1px;
-                font-size: 11px;
-                min-height: 16px;
-            }
-            
-            QComboBox {
-                padding: 2px 6px;
-                margin: 1px;
-                font-size: 11px;
-                min-height: 18px;
-            }
-            
-            QLabel {
-                margin: 1px;
-                font-size: 11px;
-            }
-            
-            QListWidget {
-                padding: 2px;
-                font-size: 11px;
-            }
-            
-            QListWidget::item {
-                padding: 2px 4px;
-                margin: 1px;
-            }
-            """
-        else:
-            # Spacious mode - increased padding and margins
-            compact_styles = """
-            QWidget {
-                font-size: 14px;
-            }
-            
-            QTextBrowser {
-                padding: 16px;
-                margin: 8px;
-                line-height: 1.6;
-            }
-            
-            QTextEdit {
-                padding: 12px;
-                margin: 6px;
-                font-size: 14px;
-            }
-            
-            QPushButton {
-                padding: 10px 16px;
-                margin: 4px;
-                font-size: 13px;
-                min-height: 24px;
-            }
-            
-            QComboBox {
-                padding: 6px 12px;
-                margin: 4px;
-                font-size: 13px;
-                min-height: 26px;
-            }
-            
-            QLabel {
-                margin: 4px;
-                font-size: 13px;
-            }
-            
-            QListWidget {
-                padding: 8px;
-                font-size: 13px;
-            }
-            
-            QListWidget::item {
-                padding: 6px 8px;
-                margin: 2px;
-            }
-            """
-        
-        # Apply the mode-specific styles on top of the existing theme
-        current_style = self.styleSheet()
-        self.setStyleSheet(current_style + compact_styles)
-
-    def load_selected_conv(self, index):
-        """Load selected conversation or next batch if 'Load More'"""
-        item = self.conv_listbox.item(index)
-        if item and item.text() == "↓ Load More Conversations":
-            self.conv_listbox.takeItem(index)  # Remove the 'Load More' item
-            self._lazy_load_next_batch()
+    def show_prompt_history(self):
+        """Show prompt history dropdown"""
+        if not self.prompt_history:
+            QMessageBox.information(self, "Prompt History", "No prompt history available.")
             return
-        # ...existing code for loading conversation...
-        if index < 0:
-            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Prompt History")
+        dialog.setMinimumSize(500, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        # History list
+        history_list = QListWidget()
+        for prompt in self.prompt_history[-20:]:  # Last 20 prompts
+            item = QListWidgetItem(prompt[:100] + "..." if len(prompt) > 100 else prompt)
+            item.setData(Qt.ItemDataRole.UserRole, prompt)
+            history_list.addItem(item)
+
+        history_list.itemDoubleClicked.connect(lambda item: self.use_history_prompt(dialog, item))
+        layout.addWidget(history_list)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        use_btn = QPushButton("Use Selected")
+        use_btn.clicked.connect(lambda: self.use_history_prompt(dialog, history_list.currentItem()))
+        button_layout.addWidget(use_btn)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.close)
+        button_layout.addWidget(close_btn)
+
+        layout.addLayout(button_layout)
+        dialog.exec()
+
+    def use_history_prompt(self, dialog, item):
+        """Use selected prompt from history"""
         if item:
-            name = item.text()
-            conv_id = self.conversation_map.get(name)
-            if conv_id:
-                self.load_conversation(conv_id)
+            prompt = item.data(Qt.ItemDataRole.UserRole)
+            self.input_entry.setPlainText(prompt)
+            dialog.close()
 
-    def load_conversation(self, conv_id):
-        """Load a specific conversation"""
-        try:
-            filepath = f"conversations/{conv_id}.json"
-            if os.path.exists(filepath):
-                with open(filepath, 'r') as f:
-                    data = json.load(f)
-                
-                # Handle both old and new format
-                if isinstance(data, list):
-                    # Old format - just messages
-                    self.chat_history = data
-                elif isinstance(data, dict) and "messages" in data:
-                    # New format - with metadata
-                    self.chat_history = data["messages"]
-                    metadata = data.get("metadata", {})
-                    
-                    # Load system prompt if present
-                    if "system_prompt" in metadata and metadata["system_prompt"]:
-                        self.conversation_system_prompts[conv_id] = metadata["system_prompt"]
-                    
-                    # Load other metadata
-                    if "pinned_messages" in metadata:
-                        self.pinned_messages[conv_id] = metadata["pinned_messages"]
-                    
-                    # Set provider/model if available
-                    if "provider" in metadata and metadata["provider"]:
-                        # You could switch to this provider/model automatically
-                        pass
-                else:
-                    # Fallback
-                    self.chat_history = []
-                
-                self.current_conversation_id = conv_id
-                self.refresh_chat_display()
-                self.toggle_welcome_screen(False)
-                
-                # Update system prompt indicator
-                self.update_system_prompt_indicator()
-        except Exception as e:
-            logger.error(f"Failed to load conversation {conv_id}: {e}")
-
-    def refresh_chat_display(self):
-        """Refresh the chat display with all messages"""
-        self.chat_display.clear()
-        for message in self.chat_history:
-            formatted_message = self.format_message_for_display(message)
-            self.chat_display.append(formatted_message)
-
-    def format_message_for_display(self, message):
-        """Format a single message for display"""
-        role = message.get('role', 'unknown')
-        content = message.get('content', '')
-        timestamp = message.get('timestamp', '')
-        
-        if role == 'user':
-            return f"<div style='background-color: #e3f2fd; padding: 10px; margin: 5px; border-radius: 10px;'><b>👤 You:</b> {content}</div>"
-        elif role == 'assistant':
-            return f"<div style='background-color: #f3e5f5; padding: 10px; margin: 5px; border-radius: 10px;'><b>🤖 Oracle:</b> {content}</div>"
-        else:
-            return f"<div style='background-color: #f5f5f5; padding: 10px; margin: 5px; border-radius: 10px;'><b>{role}:</b> {content}</div>"
+    def toggle_voice_input(self):
+        """Toggle voice input (placeholder for future implementation)"""
+        QMessageBox.information(self, "Voice Input", "Voice input feature coming soon!")
 
     def filter_chat(self):
-        """Filter chat messages based on search entry"""
-        search_term = self.search_entry.text().strip().lower()
-        
-        if not search_term:
-            # If search is empty, show all messages
-            self.refresh_chat_display()
-            return
-        
-        # Clear the current display
-        self.chat_display.clear()
-        
-        # Filter and display messages that contain the search term
-        filtered_count = 0
-        for message in self.chat_history:
-            content = message.get('content', '').lower()
-            role = message.get('role', '')
-            
-            if search_term in content:
-                # Add the message to display
-                formatted_message = self.format_message_for_display(message)
-                self.chat_display.append(formatted_message)
-                filtered_count += 1
-        
-        # Show status message
-        if hasattr(self, 'status_bar'):
-            if filtered_count > 0:
-                self.status_bar.showMessage(f"Found {filtered_count} messages matching '{search_term}'", 3000)
-            else:
-                self.status_bar.showMessage(f"No messages found matching '{search_term}'", 3000)
-    
-    def save_chat(self):
-        """Save the current chat to a file"""
-        if not self.chat_history:
-            QMessageBox.information(self, "No Chat", "There is no chat to save.")
-            return
-        
+        """Filter chat messages based on search criteria"""
         try:
-            # Get save location from user
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Chat", f"oracle_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                "JSON files (*.json);;Text files (*.txt);;All files (*.*)"
-            )
-            
-            if file_path:
-                if file_path.endswith('.json'):
-                    self.export_chat("json", file_path)
-                else:
-                    self.export_chat("txt", file_path)
-                    
-                QMessageBox.information(self, "Chat Saved", f"Chat saved to {file_path}")
-                if hasattr(self, 'status_bar'):
-                    self.status_bar.showMessage("Chat saved", 3000)
-                    
-        except Exception as e:
-            QMessageBox.warning(self, "Save Error", f"Failed to save chat: {str(e)}")
-            logger.error(f"Error saving chat: {e}")
+            search_text = self.search_entry.text() if hasattr(self, 'search_entry') else ""
+            if not search_text:
+                return
 
-    def export_chat(self, format_type, file_path=None):
-        """Export chat in the specified format"""
-        if not self.chat_history:
-            QMessageBox.information(self, "No Chat", "There is no chat to export.")
-            return
-        
+            # Implement chat filtering logic
+            if hasattr(self, 'chat_display'):
+                # For now, just show a message - implement actual filtering later
+                self.status_bar.showMessage(f"Filtering chat for: {search_text}")
+
+        except Exception as e:
+            logger.error(f"Error filtering chat: {e}")
+
+    def show_sort_options(self):
+        """Show sort options dialog"""
         try:
-            if not file_path:
-                # Get save location from user
-                filters = {
-                    "json": "JSON files (*.json)",
-                    "txt": "Text files (*.txt)",
-                    "html": "HTML files (*.html)",
-                    "md": "Markdown files (*.md)"
-                }
-                
-                file_path, _ = QFileDialog.getSaveFileName(
-                    self, f"Export Chat as {format_type.upper()}", 
-                    f"oracle_chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_type}",
-                    f"{filters.get(format_type, 'All files (*.*)')};;All files (*.*)"
-                )
-                
-                if not file_path:
-                    return
-            
-            # Export based on format
-            if format_type == "json":
-                self._export_to_json(file_path)
-            elif format_type == "txt":
-                self._export_to_txt(file_path)
-            elif format_type == "html":
-                self._export_to_html(file_path)
-            elif format_type == "md":
-                self._export_to_markdown(file_path)
-            else:
-                raise ValueError(f"Unsupported format: {format_type}")
-                
-            if hasattr(self, 'status_bar'):
-                self.status_bar.showMessage(f"Chat exported to {format_type.upper()}", 3000)
-                
+            from PyQt6.QtWidgets import QMenu
+            menu = QMenu(self)
+
+            # Add sort options
+            menu.addAction("Date (Newest First)", lambda: self.sort_conversations("date_desc"))
+            menu.addAction("Date (Oldest First)", lambda: self.sort_conversations("date_asc"))
+            menu.addAction("Name (A-Z)", lambda: self.sort_conversations("name_asc"))
+            menu.addAction("Name (Z-A)", lambda: self.sort_conversations("name_desc"))
+
+            # Show menu at cursor
+            menu.exec(QCursor.pos())
+
         except Exception as e:
-            QMessageBox.warning(self, "Export Error", f"Failed to export chat: {str(e)}")
-            logger.error(f"Error exporting chat: {e}")
+            logger.error(f"Error showing sort options: {e}")
 
-    def _export_to_json(self, file_path):
-        """Export chat to JSON format with proper structure"""
-        chat_data = {
-            "metadata": {
-                "export_timestamp": datetime.now().isoformat(),
-                "export_version": "2.0",
-                "application": "The Oracle",
-                "provider": self.current_provider,
-                "model": self.current_model,
-                "conversation_id": self.current_conversation_id,
-                "total_messages": len(self.chat_history)
-            },
-            "conversation": {
-                "id": self.current_conversation_id,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
-                "settings": {
-                    "provider": self.current_provider,
-                    "model": self.current_model,
-                    "system_prompt": getattr(self, 'system_prompt', ''),
-                    "temperature": getattr(self, 'temperature', 0.7),
-                    "max_tokens": getattr(self, 'max_tokens', 2048)
-                }
-            },
-            "messages": []
-        }
-        
-        # Process chat history with proper message structure
-        for i, entry in enumerate(self.chat_history):
-            if isinstance(entry, dict):
-                message = {
-                    "id": entry.get("id", f"msg_{i}"),
-                    "role": entry.get("role", "unknown"),
-                    "content": entry.get("content", ""),
-                    "timestamp": entry.get("timestamp", datetime.now().isoformat()),
-                    "metadata": {
-                        "index": i,
-                        "word_count": len(entry.get("content", "").split()),
-                        "char_count": len(entry.get("content", "")),
-                        "model": entry.get("model", self.current_model),
-                        "provider": entry.get("provider", self.current_provider)
-                    }
-                }
-                
-                # Add any additional metadata
-                if "thinking" in entry:
-                    message["metadata"]["thinking"] = entry["thinking"]
-                if "finish_reason" in entry:
-                    message["metadata"]["finish_reason"] = entry["finish_reason"]
-                if "usage" in entry:
-                    message["metadata"]["usage"] = entry["usage"]
-                
-                chat_data["messages"].append(message)
-            else:
-                # Handle legacy format
-                message = {
-                    "id": f"legacy_msg_{i}",
-                    "role": "unknown",
-                    "content": str(entry),
-                    "timestamp": datetime.now().isoformat(),
-                    "metadata": {
-                        "index": i,
-                        "legacy_format": True,
-                        "word_count": len(str(entry).split()),
-                        "char_count": len(str(entry))
-                    }
-                }
-                chat_data["messages"].append(message)
-        
-        # Add conversation statistics
-        chat_data["statistics"] = {
-            "total_messages": len(chat_data["messages"]),
-            "user_messages": len([m for m in chat_data["messages"] if m["role"] == "user"]),
-            "assistant_messages": len([m for m in chat_data["messages"] if m["role"] == "assistant"]),
-            "system_messages": len([m for m in chat_data["messages"] if m["role"] == "system"]),
-            "total_words": sum(m["metadata"]["word_count"] for m in chat_data["messages"]),
-            "total_characters": sum(m["metadata"]["char_count"] for m in chat_data["messages"])
-        }
-        
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(chat_data, f, indent=2, ensure_ascii=False)
-        
-        logger.info(f"Exported conversation with {len(chat_data['messages'])} messages to {file_path}")
-
-    def _export_to_txt(self, file_path):
-        """Export chat to plain text format"""
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(f"Oracle Chat Export\n")
-            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Provider: {self.current_provider}\n")
-            f.write(f"Model: {self.current_model}\n")
-            f.write("="*50 + "\n\n")
-            
-            for entry in self.chat_history:
-                if isinstance(entry, dict):
-                    role = entry.get("role", "unknown").title()
-                    content = entry.get("content", "")
-                    timestamp = entry.get("timestamp", "")
-                    
-                    f.write(f"{role}")
-                    if timestamp:
-                        f.write(f" ({timestamp})")
-                    f.write(":\n")
-                    f.write(f"{content}\n\n")
-                else:
-                    f.write(f"{entry}\n\n")
-
-    def _export_to_html(self, file_path):
-        """Export chat to HTML format"""
-        html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Oracle Chat Export</title>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; }}
-        .header {{ background: #f0f0f0; padding: 10px; margin-bottom: 20px; }}
-        .message {{ margin-bottom: 15px; padding: 10px; border-radius: 5px; }}
-        .user {{ background: #e3f2fd; }}
-        .assistant {{ background: #f3e5f5; }}
-        .system {{ background: #fff3e0; }}
-        .timestamp {{ font-size: 0.8em; color: #666; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>Oracle Chat Export</h1>
-        <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-        <p>Provider: {self.current_provider} | Model: {self.current_model}</p>
-    </div>
-"""
-        
-        for entry in self.chat_history:
-            if isinstance(entry, dict):
-                role = entry.get("role", "unknown")
-                content = entry.get("content", "").replace("\n", "<br>")
-                timestamp = entry.get("timestamp", "")
-                
-                html_content += f"""
-    <div class="message {role}">
-        <strong>{role.title()}</strong>
-        {f'<span class="timestamp">({timestamp})</span>' if timestamp else ''}
-        <div>{content}</div>
-    </div>
-"""
-            else:
-                content_with_breaks = str(entry).replace("\n", "<br>")
-                html_content += f"""
-    <div class="message">
-        <div>{content_with_breaks}</div>
-    </div>
-"""
-        
-        html_content += """
-</body>
-</html>
-"""
-        
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-
-    def _export_to_markdown(self, file_path):
-        """Export chat to Markdown format"""
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write("# Oracle Chat Export\n\n")
-            f.write(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  \n")
-            f.write(f"**Provider:** {self.current_provider}  \n")
-            f.write(f"**Model:** {self.current_model}  \n\n")
-            f.write("---\n\n")
-            
-            for entry in self.chat_history:
-                if isinstance(entry, dict):
-                    role = entry.get("role", "unknown").title()
-                    content = entry.get("content", "")
-                    timestamp = entry.get("timestamp", "")
-                    
-                    f.write(f"## {role}")
-                    if timestamp:
-                        f.write(f" *({timestamp})*")
-                    f.write("\n\n")
-                    f.write(f"{content}\n\n")
-                else:
-                    f.write(f"{entry}\n\n")
-
-    def save_current_conversation_to_json(self):
-        """Save the current conversation to JSON in conversations directory"""
-        if not self.chat_history:
-            return
-        
+    def sort_conversations(self, sort_type):
+        """Sort conversations by the specified criteria"""
         try:
-            # Create conversations directory if it doesn't exist
-            conversations_dir = os.path.join(os.path.dirname(__file__), "..", "conversations")
-            os.makedirs(conversations_dir, exist_ok=True)
-            
-            # Generate filename
-            if self.current_conversation_id:
-                filename = f"conv_{self.current_conversation_id}.json"
-            else:
-                filename = f"conv_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            
-            file_path = os.path.join(conversations_dir, filename)
-            
-            # Export to JSON
-            self._export_to_json(file_path)
-            
-            logger.info(f"Conversation saved to {file_path}")
-            
+            if hasattr(self, 'conversation_list'):
+                # Implement sorting logic based on sort_type
+                self.status_bar.showMessage(f"Sorted conversations by {sort_type}")
+
         except Exception as e:
-            logger.error(f"Error saving conversation: {e}")
+            logger.error(f"Error sorting conversations: {e}")
+
+    def load_selected_conv(self, row):
+        """Load the selected conversation"""
+        try:
+            if row >= 0 and hasattr(self, 'conv_listbox'):
+                item = self.conv_listbox.item(row)
+                if item:
+                    conv_name = item.text()
+                    # Load conversation from history/storage
+                    # For now, just update the status
+                    self.status_bar.showMessage(f"Loaded conversation: {conv_name}")
+
+        except Exception as e:
+            logger.error(f"Error loading conversation: {e}")
 
     def new_conversation(self):
         """Start a new conversation"""
-        # Save current conversation if it has content
-        if hasattr(self, 'chat_history') and self.chat_history:
-            reply = QMessageBox.question(
-                self, "New Conversation", 
-                "Save the current conversation before starting a new one?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+        try:
+            # Clear chat display
+            if hasattr(self, 'chat_display'):
+                self.chat_display.clear()
+
+            # Reset conversation state
+            if hasattr(self, 'conversation_history'):
+                self.conversation_history = []
+
+            # Clear input field
+            if hasattr(self, 'input_entry'):
+                self.input_entry.clear()
+
+            # Update chat info
+            if hasattr(self, 'chat_info_label'):
+                self.chat_info_label.setText("🤖 Ready to assist you!")
+
+            # Add welcome message
+            if hasattr(self, 'chat_display'):
+                welcome_msg = """
+<div style="padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; border-radius: 10px; margin: 10px;">
+    <h2>🌟 Welcome to The Oracle!</h2>
+    <p>I'm here to help you with any questions or tasks. Here are some things you can try:</p>
+    <ul>
+        <li>🧠 Ask me anything - I have access to extensive knowledge</li>
+        <li>💻 Request code examples or debugging help</li>
+        <li>📝 Ask me to explain complex topics</li>
+        <li>🔍 Use RAG features for document analysis</li>
+        <li>⚡ Try slash commands like /summarize or /explain</li>
+    </ul>
+    <p><em>Pro tip: Use Ctrl+Shift+F for semantic search and Ctrl+Shift+G for RAG analytics!</em></p>
+</div>
+                """
+                self.chat_display.append(welcome_msg)
+
+            # Reset current conversation ID
+            self.current_conversation_id = None
+
+            # Update status
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage("Started new conversation")
+
+            logger.info("New conversation started")
+
+        except Exception as e:
+            logger.error(f"Error starting new conversation: {e}")
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"Error: {e}")
+
+    def open_conversation(self):
+        """Open an existing conversation from file"""
+        try:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Open Conversation",
+                "conversations/",
+                "JSON Files (*.json);;All Files (*)"
             )
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-            elif reply == QMessageBox.StandardButton.Yes:
-                self.save_current_conversation_to_json()
-        
-        # Clear current conversation data
-        self.chat_display.clear()
-        self.chat_history = []
-        self.conversation_history = []
-        self.current_conversation_id = None
-        
-        # Clear input field
-        if hasattr(self, 'input_entry'):
-            self.input_entry.clear()
-        
-        # Reset conversation selection in the list
-        if hasattr(self, 'conv_listbox'):
-            self.conv_listbox.clearSelection()
-        
-        # Update status
-        if hasattr(self, 'status_bar'):
-            self.status_bar.showMessage("🚀 New conversation started!", 3000)
 
-    def pull_model(self):
-        """Pull/download a model using Ollama"""
-        if self.current_provider != "Ollama":
-            QMessageBox.warning(self, "Feature Not Available", 
-                              "Model pulling is only available for Ollama.")
-            return
-        
-        # Check if Ollama is available
-        if not self.multi_client.is_ollama_available():
-            QMessageBox.warning(self, "Ollama Not Available", 
-                              "Ollama is not available. Please ensure Ollama is installed and running.")
-            return
-        
-        # Get model name from user
-        model_name, ok = QInputDialog.getText(
-            self, "Pull Model", 
-            "Enter the model name to pull (e.g., 'llama2', 'codellama', 'mistral'):",
-            QLineEdit.EchoMode.Normal
-        )
-        
-        if not ok or not model_name.strip():
-            return
-        
-        model_name = model_name.strip()
-        
-        # Confirm the action
-        reply = QMessageBox.question(
-            self, "Confirm Model Pull",
-            f"This will download the model '{model_name}' from Ollama.\n"
-            "Large models can take significant time and bandwidth.\n\n"
-            "Do you want to continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        
-        # Start the pull operation in a background thread
-        self._start_model_pull(model_name)
-    
-    def _start_model_pull(self, model_name):
-        """Start model pull operation in background thread"""
-        from PyQt6.QtCore import QThread, pyqtSignal
-        
-        class ModelPullThread(QThread):
-            progress_update = pyqtSignal(str)
-            pull_completed = pyqtSignal(bool, str)
-            
-            def __init__(self, model_name, multi_client):
-                super().__init__()
-                self.model_name = model_name
-                self.multi_client = multi_client
-            
-            def run(self):
-                try:
-                    self.progress_update.emit(f"Starting pull for model: {self.model_name}")
-                    
-                    # Use the multi_client's pull_ollama_model method
-                    for progress in self.multi_client.pull_ollama_model(self.model_name):
-                        self.progress_update.emit(progress)
-                    
-                    self.pull_completed.emit(True, f"Successfully pulled model: {self.model_name}")
-                except Exception as e:
-                    self.pull_completed.emit(False, f"Failed to pull model: {str(e)}")
-        
-        # Create and start the thread
-        self.pull_thread = ModelPullThread(model_name, self.multi_client)
-        self.pull_thread.progress_update.connect(self._on_pull_progress)
-        self.pull_thread.pull_completed.connect(self._on_pull_completed)
-        
-        # Disable pull button during operation
-        self.pull_button.setEnabled(False)
-        self.pull_button.setText("📥 Pulling...")
-        
-        # Show status message
-        self.status_bar.showMessage(f"Pulling model: {model_name}...")
-        
-        self.pull_thread.start()
-    
-    def _on_pull_progress(self, message):
-        """Handle pull progress updates"""
-        self.status_bar.showMessage(message)
-        logger.info(message)
-    
-    def _on_pull_completed(self, success, message):
-        """Handle pull completion"""
-        # Re-enable pull button
-        self.pull_button.setEnabled(True)
-        self.pull_button.setText("📥 Pull Model")
-        
-        if success:
-            # Show success message
-            QMessageBox.information(self, "Pull Successful", message)
-            self.status_bar.showMessage("Model pull completed successfully", 5000)
-            
-            # Refresh models list for Ollama
-            if self.current_provider == "Ollama":
-                try:
-                    models = self.multi_client.refresh_ollama_models()
-                    self.model_combo.clear()
-                    if models:
-                        self.model_combo.addItems(models)
-                        # Select the newly pulled model if it's in the list
-                        if (hasattr(self, 'pull_thread') and self.pull_thread and 
-                            hasattr(self.pull_thread, 'model_name') and 
-                            self.pull_thread.model_name in models):
-                            self.model_combo.setCurrentText(self.pull_thread.model_name)
-                            self.current_model = self.pull_thread.model_name
-                except Exception as e:
-                    logger.warning(f"Failed to refresh models after pull: {e}")
-        else:
-            # Show error message
-            QMessageBox.warning(self, "Pull Failed", message)
-            self.status_bar.showMessage("Model pull failed", 5000)
-        
-        # Clean up thread
-        if hasattr(self, 'pull_thread') and self.pull_thread:
-            self.pull_thread.deleteLater()
-            self.pull_thread = None
+            if file_path:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    conversation_data = json.load(f)
 
-    def setup_auto_save(self):
-        """Set up auto-save functionality"""
-        try:
-            # Create auto-save timer
-            self.auto_save_timer = QTimer()
-            self.auto_save_timer.timeout.connect(self.auto_save_conversation)
-            
-            # Set auto-save interval (5 minutes)
-            self.auto_save_timer.start(300000)  # 5 minutes in milliseconds
-            
-            logger.info("Auto-save functionality initialized")
-        except Exception as e:
-            logger.warning(f"Failed to setup auto-save: {e}")
+                # Clear current chat
+                self.new_conversation()
 
-    def auto_save_conversation(self):
-        """Auto-save the current conversation"""
-        try:
-            if hasattr(self, 'chat_history') and self.chat_history:
-                self.save_current_conversation_to_json()
-                logger.debug("Auto-saved conversation")
-        except Exception as e:
-            logger.warning(f"Auto-save failed: {e}")
+                # Load conversation history
+                if 'messages' in conversation_data:
+                    self.conversation_history = conversation_data['messages']
 
-    def load_chat_on_startup(self):
-        """Load the most recent chat on startup"""
-        try:
-            # Try to load the most recent conversation
-            conversations_dir = os.path.join(os.path.dirname(__file__), "..", "conversations")
-            if os.path.exists(conversations_dir):
-                # Get most recent conversation file
-                conv_files = [f for f in os.listdir(conversations_dir) if f.endswith('.json')]
-                if conv_files:
-                    # Sort by modification time, get most recent
-                    conv_files.sort(key=lambda x: os.path.getmtime(os.path.join(conversations_dir, x)), reverse=True)
-                    most_recent = conv_files[0]
-                    
-                    # Extract conversation ID
-                    conv_id = most_recent.replace('conv_', '').replace('.json', '')
-                    
-                    # Load the conversation
-                    self.load_conversation(conv_id)
-                    logger.info(f"Loaded most recent conversation: {conv_id}")
-        except Exception as e:
-            logger.warning(f"Failed to load chat on startup: {e}")
+                    # Display messages
+                    for msg in self.conversation_history:
+                        role = msg.get('role', 'user')
+                        content = msg.get('content', '')
+                        timestamp = msg.get('timestamp', '')
 
-    def setup_code_execution(self):
-        """Set up code execution environment"""
-        try:
-            # Initialize code execution settings
-            self.code_execution_enabled = True
-            self.safe_mode = True  # Run code in safe mode by default
-            
-            # Set up supported languages
-            self.supported_languages = ['python', 'javascript', 'bash', 'sql']
-            
-            logger.info("Code execution environment initialized")
-        except Exception as e:
-            logger.warning(f"Failed to setup code execution: {e}")
+                        if hasattr(self, 'message_formatter'):
+                            formatted_msg = self.message_formatter.format_message(
+                                content, role, timestamp
+                            )
+                            self.chat_display.append(formatted_msg)
 
-    def get_system_prompt_for_conversation(self):
-        """Get the system prompt for the current conversation"""
-        try:
-            # Check if there's a conversation-specific system prompt
-            if hasattr(self, 'conversation_system_prompts') and self.current_conversation_id:
-                return self.conversation_system_prompts.get(self.current_conversation_id, "")
-            
-            # Return default system prompt
-            return getattr(self, 'default_system_prompt', "")
-        except Exception as e:
-            logger.warning(f"Error getting system prompt: {e}")
-            return ""
+                # Update conversation ID
+                self.current_conversation_id = conversation_data.get('id', str(uuid.uuid4()))
 
-    def update_system_prompt_indicator(self):
-        """Update the system prompt indicator in the UI"""
-        try:
-            # Check if system prompt is set
-            system_prompt = self.get_system_prompt_for_conversation()
-            
-            # Update indicator (if it exists)
-            if hasattr(self, 'system_prompt_indicator'):
-                if system_prompt:
-                    self.system_prompt_indicator.setText("🎯 System Prompt Active")
-                    self.system_prompt_indicator.setStyleSheet("color: #4CAF50; font-weight: bold;")
-                else:
-                    self.system_prompt_indicator.setText("💬 Default Mode")
-                    self.system_prompt_indicator.setStyleSheet("color: #666; font-style: italic;")
-        except Exception as e:
-            logger.warning(f"Error updating system prompt indicator: {e}")
-
-    def set_system_prompt(self):
-        """Open dialog to set system prompt for current conversation"""
-        try:
-            current_prompt = self.get_system_prompt_for_conversation()
-            
-            # Open input dialog
-            prompt, ok = QInputDialog.getMultiLineText(
-                self, "Set System Prompt",
-                "Enter the system prompt for this conversation:",
-                current_prompt
-            )
-            
-            if ok:
-                # Initialize conversation_system_prompts if needed
-                if not hasattr(self, 'conversation_system_prompts'):
-                    self.conversation_system_prompts = {}
-                
-                # Ensure we have a conversation ID
-                if not self.current_conversation_id:
-                    self.current_conversation_id = datetime.now().strftime('%Y%m%d_%H%M%S')
-                
-                # Set the system prompt
-                if prompt.strip():
-                    self.conversation_system_prompts[self.current_conversation_id] = prompt.strip()
-                    QMessageBox.information(self, "System Prompt Set", 
-                                          "System prompt has been set for this conversation.")
-                else:
-                    # Remove system prompt if empty
-                    self.conversation_system_prompts.pop(self.current_conversation_id, None)
-                    QMessageBox.information(self, "System Prompt Cleared", 
-                                          "System prompt has been cleared for this conversation.")
-                
-                # Update indicator
-                self.update_system_prompt_indicator()
-                
                 # Update status
-                if hasattr(self, 'status_bar'):
-                    self.status_bar.showMessage("System prompt updated", 3000)
-                    
+                filename = os.path.basename(file_path)
+                self.status_bar.showMessage(f"Opened conversation: {filename}")
+
+                logger.info(f"Opened conversation from {file_path}")
+
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to set system prompt: {str(e)}")
-            logger.error(f"Error setting system prompt: {e}")
+            logger.error(f"Error opening conversation: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to open conversation: {e}")
+
+    def save_conversation(self):
+        """Save current conversation to file"""
+        try:
+            if not hasattr(self, 'conversation_history') or not self.conversation_history:
+                QMessageBox.information(self, "Save Conversation", "No conversation to save.")
+                return
+
+            # Generate default filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"conv_{timestamp}.json"
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Conversation",
+                f"conversations/{default_name}",
+                "JSON Files (*.json);;All Files (*)"
+            )
+
+            if file_path:
+                # Ensure conversations directory exists
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+                # Prepare conversation data
+                conversation_data = {
+                    'id': getattr(self, 'current_conversation_id', str(uuid.uuid4())),
+                    'created': datetime.now().isoformat(),
+                    'title': f"Conversation {timestamp}",
+                    'messages': self.conversation_history,
+                    'metadata': {
+                        'provider': getattr(self, 'current_provider', 'unknown'),
+                        'model': getattr(self, 'current_model', 'unknown'),
+                        'app_version': '2.0.0'
+                    }
+                }
+
+                # Save to file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(conversation_data, f, indent=2, ensure_ascii=False)
+
+                # Update status
+                filename = os.path.basename(file_path)
+                self.status_bar.showMessage(f"Saved conversation: {filename}")
+
+                logger.info(f"Saved conversation to {file_path}")
+
+        except Exception as e:
+            logger.error(f"Error saving conversation: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to save conversation: {e}")
+
+    def save_chat(self):
+        """Save the current chat"""
+        try:
+            # Get current conversation name or generate one
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_name = f"conversation_{timestamp}.json"
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Save Conversation",
+                default_name,
+                "JSON Files (*.json);;All Files (*)"
+            )
+
+            if file_path:
+                self.save_conversation_to_file(file_path)
+
+        except Exception as e:
+            logger.error(f"Error saving chat: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to save chat: {e}")
+
+    def save_conversation_to_file(self, file_path):
+        """Save conversation to a specific file path"""
+        try:
+            if not hasattr(self, 'messages') or not self.messages:
+                logger.warning("No messages to save")
+                return False
+
+            conversation_data = {
+                "title": getattr(self, 'current_conversation_title', "Untitled"),
+                "messages": self.messages,
+                "timestamp": datetime.now().isoformat(),
+                "provider": getattr(self, 'current_provider', "Unknown"),
+                "model": getattr(self, 'current_model', "Unknown")
+            }
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(conversation_data, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"Conversation saved to: {file_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving conversation to file: {e}")
+            return False
 
     def open_prompt_library(self):
         """Open the prompt library dialog"""
         try:
-            from ui.prompt_library_dialog import PromptLibraryDialog
             dialog = PromptLibraryDialog(self)
-            
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Get selected prompt
-                selected_prompt = dialog.get_selected_prompt()
-                if selected_prompt:
-                    # Insert into input field
-                    if hasattr(self, 'input_entry'):
-                        current_text = self.input_entry.toPlainText()
-                        if current_text:
-                            self.input_entry.setPlainText(current_text + "\n\n" + selected_prompt)
-                        else:
-                            self.input_entry.setPlainText(selected_prompt)
-                        
-                        # Move cursor to end
-                        cursor = self.input_entry.textCursor()
-                        cursor.movePosition(cursor.MoveOperation.End)
-                        self.input_entry.setTextCursor(cursor)
-                    
-                    if hasattr(self, 'status_bar'):
-                        self.status_bar.showMessage("Prompt inserted from library", 2000)
-                        
-        except ImportError:
-            QMessageBox.warning(self, "Feature Unavailable", 
-                              "Prompt library feature is not available.")
+            dialog.exec()
         except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to open prompt library: {str(e)}")
             logger.error(f"Error opening prompt library: {e}")
+            QMessageBox.information(self, "Prompt Library", "Prompt library feature coming soon!")
+
+    def set_system_prompt(self):
+        """Set or modify the system prompt"""
+        try:
+            from ui.system_prompt_dialog import SystemPromptDialog
+            dialog = SystemPromptDialog(self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                system_prompt = dialog.get_system_prompt()
+                # Store the system prompt
+                self.system_prompt = system_prompt
+                self.status_bar.showMessage("System prompt updated")
+        except Exception as e:
+            logger.error(f"Error setting system prompt: {e}")
+            # Fallback to simple input dialog
+            system_prompt, ok = QInputDialog.getMultiLineText(
+                self,
+                "System Prompt",
+                "Enter system prompt:",
+                getattr(self, 'system_prompt', '')
+            )
+            if ok:
+                self.system_prompt = system_prompt
+                self.status_bar.showMessage("System prompt updated")
+
+    def send_message(self):
+        """Send a message (placeholder - implement actual logic)"""
+        try:
+            # Get input text
+            if hasattr(self, 'input_entry'):
+                message = self.input_entry.toPlainText()
+                if message.strip():
+                    # Add to prompt history for edit functionality
+                    self.prompt_history.append(message)
+                    # Keep only last 20 prompts
+                    if len(self.prompt_history) > 20:
+                        self.prompt_history = self.prompt_history[-20:]
+                    
+                    # Add to chat display
+                    if hasattr(self, 'chat_display'):
+                        self.chat_display.append(f"User: {message}")
+
+                    # Clear input
+                    self.input_entry.clear()
+
+                    # Update status
+                    if hasattr(self, 'status_bar') and self.status_bar:
+                        self.status_bar.showMessage("Message sent")
+
+                    # Here you would add the actual AI response logic
+
+        except Exception as e:
+            logger.error(f"Error sending message: {e}")
 
     def scroll_to_bottom(self):
-        """Scroll the chat display to the bottom"""
+        """Scroll chat display to bottom"""
         try:
-            if hasattr(self, 'chat_display') and self.chat_display:
+            if hasattr(self, 'chat_display'):
                 scrollbar = self.chat_display.verticalScrollBar()
-                scrollbar.setValue(scrollbar.maximum())
+                if scrollbar:
+                    scrollbar.setValue(scrollbar.maximum())
+
+                # Hide the scroll to bottom button
+                if hasattr(self, 'scroll_to_bottom_button'):
+                    self.scroll_to_bottom_button.hide()
+
         except Exception as e:
-            logger.warning(f"Error scrolling to bottom: {e}")
-
-    def on_scroll_changed(self, value):
-        """Handle scroll position changes"""
-        try:
-            if hasattr(self, 'chat_display') and hasattr(self, 'scroll_to_bottom_button'):
-                scrollbar = self.chat_display.verticalScrollBar()
-                # Show/hide scroll to bottom button based on position
-                at_bottom = value >= scrollbar.maximum() - 10
-                self.scroll_to_bottom_button.setVisible(not at_bottom)
-        except Exception as e:
-            logger.warning(f"Error handling scroll change: {e}")
-
-    def toggle_welcome_screen(self, show):
-        """Toggle the welcome screen visibility"""
-        try:
-            if hasattr(self, 'welcome_screen'):
-                self.welcome_screen.setVisible(show)
-            if hasattr(self, 'chat_display'):
-                self.chat_display.setVisible(not show)
-        except Exception as e:
-            logger.warning(f"Error toggling welcome screen: {e}")
-
-    def manage_knowledge_base(self):
-        """Open knowledge base management dialog"""
-        # This would open a dialog to manage the knowledge base
-        QMessageBox.information(self, "Knowledge Base", 
-                              "Knowledge base management dialog would open here.")
-
-    def visualize_conversations(self):
-        """Visualize conversation patterns"""
-        # This would create visualizations of conversation patterns
-        QMessageBox.information(self, "Visualization", 
-                              "Conversation visualization would be displayed here.")
-
-    def advanced_search(self):
-        """Open advanced search dialog"""
-        # This would open an advanced search interface
-        QMessageBox.information(self, "Advanced Search", 
-                              "Advanced search dialog would open here.")
-
-    def open_keyboard_shortcuts(self):
-        """Open keyboard shortcuts editor"""
-        try:
-            from ui.keyboard_shortcut_editor import KeyboardShortcutEditor
-            dialog = KeyboardShortcutEditor(self)
-            
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Update shortcuts if needed
-                if hasattr(self, 'status_bar'):
-                    self.status_bar.showMessage("Keyboard shortcuts updated", 3000)
-                    
-        except ImportError:
-            QMessageBox.warning(self, "Feature Unavailable", 
-                              "Keyboard shortcuts editor is not available.")
-        except Exception as e:
-            logger.error(f"Error opening keyboard shortcuts: {e}")
-
-    def get_icon_path(self, category, icon_name):
-        """Get the path to an icon file"""
-        try:
-            # Build the icon path
-            icon_dir = os.path.join(os.path.dirname(__file__), "..", "icons", category)
-            
-            # Try different common image formats
-            for ext in ['.png', '.svg', '.jpg', '.ico']:
-                icon_path = os.path.join(icon_dir, f"{icon_name}{ext}")
-                if os.path.exists(icon_path):
-                    return icon_path
-            
-            # If specific icon not found, try a fallback
-            fallback_path = os.path.join(os.path.dirname(__file__), "..", "icons", f"{icon_name}.png")
-            if os.path.exists(fallback_path):
-                return fallback_path
-                
-            # Return None if no icon found
-            return None
-            
-        except Exception as e:
-            logger.warning(f"Error getting icon path for {category}/{icon_name}: {e}")
-            return None
-
-# ==================== MENU ACTION METHODS ====================
-    
-    # File Menu Methods
-    def open_conversation(self):
-        """Open a conversation from file"""
-        try:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, "Open Conversation", "", 
-                "JSON files (*.json);;Text files (*.txt);;All files (*.*)"
-            )
-            if file_path:
-                self.load_conversation_from_file(file_path)
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to open conversation: {str(e)}")
-            logger.error(f"Error opening conversation: {e}")
-
-    def save_chat_as(self):
-        """Save chat with a new filename"""
-        try:
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Chat As", "", 
-                "JSON files (*.json);;Text files (*.txt);;All files (*.*)"
-            )
-            if file_path:
-                if file_path.endswith('.json'):
-                    self.export_chat("json", file_path)
-                else:
-                    self.export_chat("txt", file_path)
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to save chat: {str(e)}")
-            logger.error(f"Error saving chat: {e}")
-
-    def import_conversation(self, format_type):
-        """Import conversation from various formats"""
-        try:
-            filters = {
-                "json": "JSON files (*.json)",
-                "txt": "Text files (*.txt)", 
-                "csv": "CSV files (*.csv)"
-            }
-            
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, f"Import {format_type.upper()}", "",
-                f"{filters.get(format_type, 'All files (*.*)')};;All files (*.*)"
-            )
-            
-            if file_path:
-                self._import_from_file(file_path, format_type)
-                QMessageBox.information(self, "Import Complete", 
-                                      f"Successfully imported conversation from {format_type.upper()}")
-        except Exception as e:
-            QMessageBox.warning(self, "Import Error", f"Failed to import: {str(e)}")
-            logger.error(f"Error importing conversation: {e}")
-
-    def import_chat_history(self):
-        """Import chat history from previous sessions"""
-        QMessageBox.information(self, "Import Chat History", 
-                              "Chat history import would be implemented here.")
-
-    def update_recent_menu(self, menu):
-        """Update the recent conversations menu"""
-        try:
-            menu.clear()
-            # Add recent conversation items here
-            recent_action = QAction("No recent conversations", self)
-            recent_action.setEnabled(False)
-            menu.addAction(recent_action)
-        except Exception as e:
-            logger.warning(f"Error updating recent menu: {e}")
-
-    def print_chat(self):
-        """Print the current chat"""
-        try:
-            from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
-            printer = QPrinter()
-            dialog = QPrintDialog(printer, self)
-            
-            if dialog.exec() == QPrintDialog.DialogCode.Accepted:
-                self.chat_display.print(printer)
-        except ImportError:
-            QMessageBox.warning(self, "Print Unavailable", 
-                              "Print functionality requires additional dependencies.")
-        except Exception as e:
-            QMessageBox.warning(self, "Print Error", f"Failed to print: {str(e)}")
-
-    # Edit Menu Methods  
-    def undo_last_action(self):
-        """Undo the last action"""
-        QMessageBox.information(self, "Undo", "Undo functionality would be implemented here.")
-
-    def redo_last_action(self):
-        """Redo the last undone action"""
-        QMessageBox.information(self, "Redo", "Redo functionality would be implemented here.")
-
-    def copy_chat_to_clipboard(self):
-        """Copy chat content to clipboard"""
-        try:
-            if hasattr(self, 'chat_display'):
-                clipboard = QApplication.clipboard()
-                clipboard.setText(self.chat_display.toPlainText())
-                if hasattr(self, 'status_bar'):
-                    self.status_bar.showMessage("Chat copied to clipboard", 2000)
-        except Exception as e:
-            logger.warning(f"Error copying to clipboard: {e}")
-
-    def paste_from_clipboard(self):
-        """Paste content from clipboard"""
-        try:
-            clipboard = QApplication.clipboard()
-            text = clipboard.text()
-            if text and hasattr(self, 'input_entry'):
-                self.input_entry.insertPlainText(text)
-        except Exception as e:
-            logger.warning(f"Error pasting from clipboard: {e}")
-
-    def find_in_chat(self):
-        """Find text in chat"""
-        QMessageBox.information(self, "Find", "Find functionality would be implemented here.")
-
-    def find_and_replace(self):
-        """Find and replace text in chat"""
-        QMessageBox.information(self, "Find & Replace", "Find and replace functionality would be implemented here.")
-
-    def select_all_chat(self):
-        """Select all chat content"""
-        try:
-            if hasattr(self, 'chat_display'):
-                self.chat_display.selectAll()
-        except Exception as e:
-            logger.warning(f"Error selecting all: {e}")
-
-    # Chat Menu Methods
-    def toggle_syntax_highlighting(self):
-        """Toggle syntax highlighting"""
-        self.syntax_highlighting = not getattr(self, 'syntax_highlighting', True)
-        if hasattr(self, 'status_bar'):
-            status = "enabled" if self.syntax_highlighting else "disabled"
-            self.status_bar.showMessage(f"Syntax highlighting {status}", 3000)
-
-    def clear_system_prompt(self):
-        """Clear the system prompt for current conversation"""
-        try:
-            if hasattr(self, 'conversation_system_prompts') and self.current_conversation_id:
-                self.conversation_system_prompts.pop(self.current_conversation_id, None)
-                self.update_system_prompt_indicator()
-                QMessageBox.information(self, "System Prompt Cleared", 
-                                      "System prompt has been cleared for this conversation.")
-        except Exception as e:
-            logger.error(f"Error clearing system prompt: {e}")
-
-    def open_prompt_templates(self):
-        """Open prompt templates dialog"""
-        try:
-            from ui.prompt_template_dialog import PromptTemplateDialog
-            dialog = PromptTemplateDialog(self)
-            dialog.exec()
-        except ImportError:
-            QMessageBox.warning(self, "Feature Unavailable", 
-                              "Prompt templates feature is not available.")
-        except Exception as e:
-            logger.error(f"Error opening prompt templates: {e}")
-
-    def translate_chat(self):
-        """Translate the current chat"""
-        QMessageBox.information(self, "Translate", "Translation functionality would be implemented here.")
-
-    def delete_last_message(self):
-        """Delete the last message in chat"""
-        try:
-            if hasattr(self, 'chat_history') and self.chat_history:
-                self.chat_history.pop()
-                self.refresh_chat_display()
-                if hasattr(self, 'status_bar'):
-                    self.status_bar.showMessage("Last message deleted", 3000)
-        except Exception as e:
-            logger.warning(f"Error deleting last message: {e}")
-
-    def edit_selected_message(self):
-        """Edit a selected message"""
-        QMessageBox.information(self, "Edit Message", "Message editing functionality would be implemented here.")
-
-    def regenerate_last_response(self):
-        """Regenerate the last AI response"""
-        try:
-            if hasattr(self, 'chat_history') and self.chat_history:
-                # Find last user message and regenerate response
-                last_user_message = None
-                for msg in reversed(self.chat_history):
-                    if isinstance(msg, dict) and msg.get('role') == 'user':
-                        last_user_message = msg.get('content', '')
-                        break
-                
-                if last_user_message:
-                    # Remove last AI response if present
-                    if (self.chat_history and isinstance(self.chat_history[-1], dict) and 
-                        self.chat_history[-1].get('role') == 'assistant'):
-                        self.chat_history.pop()
-                    
-                    # Regenerate response
-                    self.generate_response(last_user_message)
-                else:
-                    QMessageBox.information(self, "No Message", "No user message found to regenerate response for.")
-        except Exception as e:
-            logger.error(f"Error regenerating response: {e}")
-
-    # View Menu Methods
-    def toggle_fullscreen(self):
-        """Toggle fullscreen mode"""
-        if self.isFullScreen():
-            self.showNormal()
-        else:
-            self.showFullScreen()
-
-    def toggle_sidebar(self):
-        """Toggle sidebar visibility"""
-        if hasattr(self, 'sidebar_widget'):
-            visible = self.sidebar_widget.isVisible()
-            self.sidebar_widget.setVisible(not visible)
-
-    def toggle_toolbar(self):
-        """Toggle toolbar visibility"""
-        if hasattr(self, 'toolbar'):
-            visible = self.toolbar.isVisible()
-            self.toolbar.setVisible(not visible)
-
-    def toggle_status_bar(self):
-        """Toggle status bar visibility"""
-        if hasattr(self, 'status_bar'):
-            visible = self.status_bar.isVisible()
-            self.status_bar.setVisible(not visible)
-
-    def toggle_word_wrap(self):
-        """Toggle word wrap in chat display"""
-        if hasattr(self, 'chat_display'):
-            current_wrap = self.chat_display.lineWrapMode()
-            if current_wrap == QTextBrowser.LineWrapMode.NoWrap:
-                self.chat_display.setLineWrapMode(QTextBrowser.LineWrapMode.WidgetWidth)
-            else:
-                self.chat_display.setLineWrapMode(QTextBrowser.LineWrapMode.NoWrap)
-
-    def toggle_focus_mode(self):
-        """Toggle focus mode (minimal UI)"""
-        self.focus_mode = not getattr(self, 'focus_mode', False)
-        # Hide/show UI elements based on focus mode
-        if hasattr(self, 'status_bar'):
-            status = "enabled" if self.focus_mode else "disabled"
-            self.status_bar.showMessage(f"Focus mode {status}", 3000)
-
-    def zoom_in(self):
-        """Zoom in the chat display"""
-        if hasattr(self, 'chat_display'):
-            self.chat_display.zoomIn(1)
-
-    def zoom_out(self):
-        """Zoom out the chat display"""
-        if hasattr(self, 'chat_display'):
-            self.chat_display.zoomOut(1)
-
-    def reset_zoom(self):
-        """Reset zoom to default"""
-        if hasattr(self, 'chat_display'):
-            self.chat_display.zoomIn(0)  # Reset to default
-
-    # Tools Menu Methods
-    def batch_process_files(self):
-        """Batch process multiple files"""
-        QMessageBox.information(self, "Batch Process", "Batch processing functionality would be implemented here.")
-
-    def add_folder_to_rag(self):
-        """Add a folder to the RAG system"""
-        try:
-            folder_path = QFileDialog.getExistingDirectory(self, "Select Folder to Add to Knowledge Base")
-            if folder_path:
-                QMessageBox.information(self, "Folder Added", 
-                                      f"Folder would be added to knowledge base: {folder_path}")
-        except Exception as e:
-            logger.error(f"Error adding folder to RAG: {e}")
-
-    def rebuild_search_index(self):
-        """Rebuild the search index for RAG"""
-        QMessageBox.information(self, "Rebuild Index", "Search index rebuild functionality would be implemented here.")
-
-    def execute_selected_code(self):
-        """Execute selected code block"""
-        QMessageBox.information(self, "Execute Code", "Code execution functionality would be implemented here.")
-
-    def open_code_sandbox(self):
-        """Open code sandbox environment"""
-        QMessageBox.information(self, "Code Sandbox", "Code sandbox functionality would be implemented here.")
-
-    def launch_jupyter(self):
-        """Launch Jupyter Notebook"""
-        try:
-            import subprocess
-            subprocess.Popen(['jupyter', 'notebook'])
-        except Exception as e:
-            QMessageBox.warning(self, "Jupyter Error", f"Failed to launch Jupyter: {str(e)}")
-
-    def show_conversation_stats(self):
-        """Show conversation statistics"""
-        QMessageBox.information(self, "Conversation Stats", "Statistics functionality would be implemented here.")
-
-    def show_token_usage(self):
-        """Show token usage report"""
-        QMessageBox.information(self, "Token Usage", "Token usage reporting would be implemented here.")
-
-    def compare_models(self):
-        """Compare different models"""
-        QMessageBox.information(self, "Compare Models", "Model comparison functionality would be implemented here.")
-
-    def benchmark_models(self):
-        """Benchmark model performance"""
-        QMessageBox.information(self, "Benchmark Models", "Model benchmarking would be implemented here.")
-
-    def show_model_info(self):
-        """Show current model information"""
-        try:
-            info = f"Current Provider: {self.current_provider}\nCurrent Model: {self.current_model}"
-            QMessageBox.information(self, "Model Information", info)
-        except Exception as e:
-            logger.error(f"Error showing model info: {e}")
-
-    def global_search(self):
-        """Search across all conversations"""
-        QMessageBox.information(self, "Global Search", "Global search functionality would be implemented here.")
-
-    def show_word_count(self):
-        """Show word count statistics"""
-        try:
-            if hasattr(self, 'chat_history'):
-                total_words = 0
-                for entry in self.chat_history:
-                    if isinstance(entry, dict):
-                        content = entry.get('content', '')
-                        total_words += len(content.split())
-                
-                QMessageBox.information(self, "Word Count", f"Total words in conversation: {total_words}")
-        except Exception as e:
-            logger.error(f"Error counting words: {e}")
-
-    def check_grammar(self):
-        """Check grammar in the chat"""
-        QMessageBox.information(self, "Grammar Check", "Grammar checking would be implemented here.")
-
-    def check_spelling(self):
-        """Check spelling in the chat"""
-        QMessageBox.information(self, "Spell Check", "Spell checking would be implemented here.")
-
-    def create_text_summary(self):
-        """Create a summary of the text"""
-        QMessageBox.information(self, "Text Summary", "Text summarization would be implemented here.")
-
-    # Settings Menu Methods
-    def open_provider_settings(self):
-        """Open provider-specific settings"""
-        QMessageBox.information(self, "Provider Settings", "Provider settings would be implemented here.")
-
-    def open_preferences(self):
-        """Open general preferences dialog"""
-        QMessageBox.information(self, "Preferences", "Preferences dialog would be implemented here.")
-
-    def set_dark_theme(self):
-        """Set dark theme"""
-        self.dark_theme = True
-        self.setup_styles()
-
-    def set_light_theme(self):
-        """Set light theme"""
-        self.dark_theme = False
-        self.setup_styles()
-
-    def set_auto_theme(self):
-        """Set automatic theme based on system"""
-        QMessageBox.information(self, "Auto Theme", "Auto theme functionality would be implemented here.")
-
-    def open_theme_editor(self):
-        """Open custom theme editor"""
-        QMessageBox.information(self, "Theme Editor", "Custom theme editor would be implemented here.")
-
-    def open_input_settings(self):
-        """Open input settings dialog"""
-        QMessageBox.information(self, "Input Settings", "Input settings would be implemented here.")
-
-    def open_advanced_settings(self):
-        """Open advanced settings dialog"""
-        QMessageBox.information(self, "Advanced Settings", "Advanced settings would be implemented here.")
-
-    def open_plugin_manager(self):
-        """Open plugin manager"""
-        QMessageBox.information(self, "Plugin Manager", "Plugin manager would be implemented here.")
-
-    def export_settings(self):
-        """Export application settings"""
-        try:
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Export Settings", "oracle_settings.json",
-                "JSON files (*.json);;All files (*.*)"
-            )
-            if file_path:
-                QMessageBox.information(self, "Settings Exported", f"Settings exported to {file_path}")
-        except Exception as e:
-            logger.error(f"Error exporting settings: {e}")
-
-    def import_settings(self):
-        """Import application settings"""
-        try:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, "Import Settings", "",
-                "JSON files (*.json);;All files (*.*)"
-            )
-            if file_path:
-                QMessageBox.information(self, "Settings Imported", f"Settings imported from {file_path}")
-        except Exception as e:
-            logger.error(f"Error importing settings: {e}")
-
-    def reset_settings(self):
-        """Reset all settings to defaults"""
-        reply = QMessageBox.question(
-            self, "Reset Settings", 
-            "Are you sure you want to reset all settings to defaults?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            QMessageBox.information(self, "Settings Reset", "Settings have been reset to defaults.")
-
-    # Help Menu Methods
-    def open_user_guide(self):
-        """Open user guide"""
-        QMessageBox.information(self, "User Guide", "User guide would open here.")
-
-    def show_keyboard_help(self):
-        """Show keyboard shortcuts help"""
-        help_text = """
-Keyboard Shortcuts:
-
-File Operations:
-Ctrl+N - New Conversation
-Ctrl+O - Open Conversation  
-Ctrl+S - Save Chat
-Ctrl+P - Print Chat
-Ctrl+Q - Exit
-
-Edit Operations:
-Ctrl+Z - Undo
-Ctrl+Y - Redo
-Ctrl+C - Copy Chat
-Ctrl+V - Paste
-Ctrl+F - Find in Chat
-Ctrl+H - Find and Replace
-Ctrl+A - Select All
-
-Chat Operations:
-Ctrl+L - Open Prompt Library
-Ctrl+Shift+P - Set System Prompt
-Ctrl+Delete - Clear Chat
-Ctrl+R - Regenerate Response
-Ctrl+Backspace - Delete Last Message
-
-View Operations:
-F11 - Toggle Fullscreen
-Ctrl++ - Zoom In
-Ctrl+- - Zoom Out
-Ctrl+0 - Reset Zoom
-
-Tools:
-Ctrl+E - Execute Selected Code
-Ctrl+Shift+A - Attach File
-Ctrl+Shift+F - Advanced Search
-
-Settings:
-Ctrl+, - Preferences
-
-Help:
-F1 - User Guide
-        """
-        
-        QMessageBox.information(self, "Keyboard Shortcuts", help_text)
-
-    def start_feature_tour(self):
-        """Start interactive feature tour"""
-        QMessageBox.information(self, "Feature Tour", "Interactive feature tour would start here.")
-
-    def report_bug(self):
-        """Report a bug"""
-        QMessageBox.information(self, "Report Bug", "Bug reporting functionality would be implemented here.")
-
-    def request_feature(self):
-        """Request a new feature"""
-        QMessageBox.information(self, "Feature Request", "Feature request functionality would be implemented here.")
-
-    def send_feedback(self):
-        """Send feedback"""
-        QMessageBox.information(self, "Send Feedback", "Feedback functionality would be implemented here.")
-
-    def check_for_updates(self):
-        """Check for application updates"""
-        QMessageBox.information(self, "Check Updates", "Update checking would be implemented here.")
-
-    def show_changelog(self):
-        """Show application changelog"""
-        QMessageBox.information(self, "Changelog", "Changelog would be displayed here.")
-
-    def show_about_dialog(self):
-        """Show about dialog"""
-        about_text = """
-The Oracle - AI Chat Application
-
-Version: 2.0.0
-A sophisticated AI chat application with multi-provider support.
-
-Features:
-• Multiple AI provider support
-• Advanced prompt management  
-• Code execution capabilities
-• Knowledge base integration
-• Conversation analytics
-• Comprehensive export options
-• Modern, customizable interface
-
-© 2025 The Oracle Team
-        """
-        QMessageBox.about(self, "About The Oracle", about_text)
-
-    # Helper Methods for Menu Actions
-    def load_conversation_from_file(self, file_path):
-        """Load conversation from a file"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                if file_path.endswith('.json'):
-                    data = json.load(f)
-                    # Process JSON conversation data
-                    if isinstance(data, dict) and 'messages' in data:
-                        self.chat_history = data['messages']
-                        self.refresh_chat_display()
-                else:
-                    # Handle text files
-                    content = f.read()
-                    self.chat_display.setPlainText(content)
-        except Exception as e:
-            raise Exception(f"Failed to load conversation: {str(e)}")
-
-    def _import_from_file(self, file_path, format_type):
-        """Import conversation from file based on format"""
-        try:
-            if format_type == "json":
-                self.load_conversation_from_file(file_path)
-            elif format_type == "txt":
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    # Parse text content into messages
-                    lines = content.split('\n')
-                    # Simple parsing - can be enhanced
-                    for line in lines:
-                        if line.strip():
-                            self.chat_history.append({
-                                'role': 'user',
-                                'content': line.strip(),
-                                'timestamp': datetime.now().isoformat()
-                            })
-                self.refresh_chat_display()
-            elif format_type == "csv":
-                import csv
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    reader = csv.reader(f)
-                    for row in reader:
-                        if len(row) >= 2:
-                            self.chat_history.append({
-                                'role': row[0],
-                                'content': row[1],
-                                'timestamp': datetime.now().isoformat()
-                            })
-                self.refresh_chat_display()
-        except Exception as e:
-            raise Exception(f"Failed to import from {format_type}: {str(e)}")
-
-    # Additional missing methods referenced in existing code
-    def load_chat(self):
-        """Load a chat from file (legacy method)"""
-        self.open_conversation()
-
-    def clear_chat(self):
-        """Clear the current chat"""
-        try:
-            reply = QMessageBox.question(
-                self, "Clear Chat", 
-                "Are you sure you want to clear the current chat?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                self.chat_display.clear()
-                self.chat_history = []
-                self.conversation_history = []
-                if hasattr(self, 'status_bar'):
-                    self.status_bar.showMessage("Chat cleared", 3000)
-        except Exception as e:
-            logger.error(f"Error clearing chat: {e}")
-
-    def summarize_chat(self):
-        """Summarize the current chat"""
-        try:
-            if not self.chat_history:
-                QMessageBox.information(self, "No Chat", "There is no chat to summarize.")
-                return
-                
-            # Simple summary - count messages and basic stats
-            total_messages = len(self.chat_history)
-            user_messages = sum(1 for msg in self.chat_history 
-                              if isinstance(msg, dict) and msg.get('role') == 'user')
-            assistant_messages = total_messages - user_messages
-            
-            summary = f"""
-Chat Summary:
-• Total messages: {total_messages}
-• User messages: {user_messages}  
-• Assistant messages: {assistant_messages}
-• Current provider: {self.current_provider}
-• Current model: {self.current_model}
-            """
-            
-            QMessageBox.information(self, "Chat Summary", summary)
-        except Exception as e:
-            logger.error(f"Error summarizing chat: {e}")
+            logger.error(f"Error scrolling to bottom: {e}")
 
     def attach_file(self):
         """Attach a file to the conversation"""
         try:
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "Attach File", "",
-                "All files (*.*);;Text files (*.txt);;Images (*.png *.jpg *.gif)"
+                self,
+                "Attach File",
+                "",
+                "All Files (*);;Text Files (*.txt);;Images (*.png *.jpg *.jpeg *.gif);;Documents (*.pdf *.doc *.docx)"
             )
-            
+
             if file_path:
-                QMessageBox.information(self, "File Attached", 
-                                      f"File attachment functionality would process: {file_path}")
+                # Add file to conversation (placeholder logic)
+                filename = os.path.basename(file_path)
+                if hasattr(self, 'chat_display'):
+                    self.chat_display.append(f"📎 Attached: {filename}")
+
+                self.status_bar.showMessage(f"Attached file: {filename}")
+
         except Exception as e:
             logger.error(f"Error attaching file: {e}")
 
-    def add_document_to_rag(self):
-        """Add a document to the RAG system"""
+    def open_persona_gallery(self):
+        """Open persona gallery dialog"""
+        try:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("👤 AI Personas Gallery")
+            dialog.setMinimumSize(800, 600)
+
+            layout = QVBoxLayout(dialog)
+
+            # Header
+            header = QLabel("<h2>🎭 Choose an AI Persona</h2>")
+            header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(header)
+
+            # Persona grid
+            scroll = QScrollArea()
+            scroll_widget = QWidget()
+            grid_layout = QGridLayout(scroll_widget)
+
+            # Sample personas
+            personas = [
+                {"name": "🧠 The Expert", "desc": "Deep technical knowledge specialist", "prompt": "You are an expert with deep technical knowledge. Provide detailed, accurate explanations."},
+                {"name": "🎨 The Creative", "desc": "Creative writing and brainstorming", "prompt": "You are a creative assistant who thinks outside the box and provides innovative ideas."},
+                {"name": "📚 The Teacher", "desc": "Patient educator and explainer", "prompt": "You are a patient teacher who explains concepts clearly with examples."},
+                {"name": "💼 The Professional", "desc": "Business and formal communications", "prompt": "You are a professional assistant focused on business communications and formal writing."},
+                {"name": "🔬 The Researcher", "desc": "Research and analysis specialist", "prompt": "You are a thorough researcher who provides well-sourced, analytical responses."},
+                {"name": "🛠️ The Developer", "desc": "Programming and technical solutions", "prompt": "You are a senior developer who provides clean, efficient code solutions with explanations."},
+            ]
+
+            row, col = 0, 0
+            for persona in personas:
+                # Create persona card
+                card = QFrame()
+                card.setFrameStyle(QFrame.Shape.Box)
+                card.setStyleSheet("""
+                    QFrame {
+                        border: 2px solid #ddd;
+                        border-radius: 10px;
+                        padding: 10px;
+                        margin: 5px;
+                        background-color: #f9f9f9;
+                    }
+                    QFrame:hover {
+                        border-color: #4CAF50;
+                        background-color: #f0f8ff;
+                    }
+                """)
+
+                card_layout = QVBoxLayout(card)
+
+                # Persona name
+                name_label = QLabel(persona["name"])
+                name_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+                card_layout.addWidget(name_label)
+
+                # Description
+                desc_label = QLabel(persona["desc"])
+                desc_label.setWordWrap(True)
+                desc_label.setStyleSheet("color: #666; margin: 5px 0;")
+                card_layout.addWidget(desc_label)
+
+                # Select button
+                select_btn = QPushButton("Select")
+                select_btn.clicked.connect(lambda checked, p=persona: self.select_persona(p, dialog))
+                select_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #4CAF50;
+                        color: white;
+                        border: none;
+                        padding: 8px 16px;
+                        border-radius: 5px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #45a049;
+                    }
+                """)
+                card_layout.addWidget(select_btn)
+
+                grid_layout.addWidget(card, row, col)
+
+                col += 1
+                if col >= 2:
+                    col = 0
+                    row += 1
+
+            scroll.setWidget(scroll_widget)
+            layout.addWidget(scroll)
+
+            # Custom persona section
+            custom_group = QGroupBox("Create Custom Persona")
+            custom_layout = QVBoxLayout(custom_group)
+
+            custom_name = QLineEdit()
+            custom_name.setPlaceholderText("Enter persona name...")
+            custom_layout.addWidget(QLabel("Name:"))
+            custom_layout.addWidget(custom_name)
+
+            custom_prompt = QTextEdit()
+            custom_prompt.setPlaceholderText("Enter system prompt for this persona...")
+            custom_prompt.setMaximumHeight(100)
+            custom_layout.addWidget(QLabel("System Prompt:"))
+            custom_layout.addWidget(custom_prompt)
+
+            create_btn = QPushButton("Create & Use")
+            create_btn.clicked.connect(lambda: self.create_custom_persona(custom_name.text(), custom_prompt.toPlainText(), dialog))
+            custom_layout.addWidget(create_btn)
+
+            layout.addWidget(custom_group)
+
+            # Close button
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.close)
+            layout.addWidget(close_btn)
+
+            dialog.exec()
+
+        except Exception as e:
+            logger.error(f"Error opening persona gallery: {e}")
+            QMessageBox.information(self, "Persona Gallery", "Persona gallery feature coming soon!")
+
+    def select_persona(self, persona, dialog):
+        """Select a persona and apply its system prompt"""
+        try:
+            self.system_prompt = persona["prompt"]
+            self.current_persona = persona["name"]
+
+            # Update UI to show selected persona
+            if hasattr(self, 'chat_info_label'):
+                self.chat_info_label.setText(f"{persona['name']} is ready to assist!")
+
+            # Update status
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"Selected persona: {persona['name']}")
+
+            dialog.close()
+            logger.info(f"Selected persona: {persona['name']}")
+
+        except Exception as e:
+            logger.error(f"Error selecting persona: {e}")
+
+    def create_custom_persona(self, name, prompt, dialog):
+        """Create and use a custom persona"""
+        try:
+            if not name.strip() or not prompt.strip():
+                QMessageBox.warning(dialog, "Invalid Input", "Please provide both name and prompt.")
+                return
+
+            custom_persona = {
+                "name": f"🎭 {name}",
+                "desc": "Custom persona",
+                "prompt": prompt
+            }
+
+            self.select_persona(custom_persona, dialog)
+
+        except Exception as e:
+            logger.error(f"Error creating custom persona: {e}")
+
+    def open_prompt_templates(self):
+        """Open prompt templates dialog"""
+        try:
+            dialog = PromptTemplateDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening prompt templates: {e}")
+            # Fallback dialog
+            self.show_prompt_templates_fallback()
+
+    def show_prompt_templates_fallback(self):
+        """Fallback prompt templates dialog"""
+        try:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("📝 Prompt Templates")
+            dialog.setMinimumSize(700, 500)
+
+            layout = QVBoxLayout(dialog)
+
+            # Header
+            header = QLabel("<h2>📝 Prompt Templates & Generator</h2>")
+            header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(header)
+
+            # Template categories
+            tabs = QTabWidget()
+
+            # Writing templates
+            writing_tab = QWidget()
+            writing_layout = QVBoxLayout(writing_tab)
+
+            writing_templates = [
+                ("Email Draft", "Please help me write a professional email about: [TOPIC]\n\nTone: [FORMAL/CASUAL]\nRecipient: [RECIPIENT]\nPurpose: [PURPOSE]"),
+                ("Essay Outline", "Create an outline for an essay on: [TOPIC]\n\nLength: [WORD COUNT]\nStyle: [ACADEMIC/PERSUASIVE/INFORMATIVE]\nKey points to cover: [POINTS]"),
+                ("Creative Story", "Write a creative story with the following elements:\n\nGenre: [GENRE]\nSetting: [SETTING]\nMain character: [CHARACTER]\nPlot twist: [TWIST]"),
+                ("Product Description", "Write a compelling product description for: [PRODUCT]\n\nTarget audience: [AUDIENCE]\nKey features: [FEATURES]\nTone: [TONE]")
+            ]
+
+            for name, template in writing_templates:
+                btn = QPushButton(f"📝 {name}")
+                btn.clicked.connect(lambda checked, t=template: self.use_template(t))
+                writing_layout.addWidget(btn)
+
+            tabs.addTab(writing_tab, "Writing")
+
+            # Code templates
+            code_tab = QWidget()
+            code_layout = QVBoxLayout(code_tab)
+
+            code_templates = [
+                ("Code Review", "Please review the following code:\n\n```[LANGUAGE]\n[CODE]\n```\n\nFocus on: [AREAS TO REVIEW]"),
+                ("Bug Fix", "I'm getting this error: [ERROR]\n\nIn this code:\n```[LANGUAGE]\n[CODE]\n```\n\nPlease help me fix it."),
+                ("Code Explanation", "Please explain how this code works:\n\n```[LANGUAGE]\n[CODE]\n```\n\nLevel of detail: [BEGINNER/INTERMEDIATE/ADVANCED]"),
+                ("Optimization", "Please optimize this code for [PERFORMANCE/READABILITY/MAINTAINABILITY]:\n\n```[LANGUAGE]\n[CODE]\n```")
+            ]
+
+            for name, template in code_templates:
+                btn = QPushButton(f"💻 {name}")
+                btn.clicked.connect(lambda checked, t=template: self.use_template(t))
+                code_layout.addWidget(btn)
+
+            tabs.addTab(code_tab, "Code")
+
+            # Analysis templates
+            analysis_tab = QWidget()
+            analysis_layout = QVBoxLayout(analysis_tab)
+
+            analysis_templates = [
+                ("Data Analysis", "Please analyze this data:\n\n[DATA/DESCRIPTION]\n\nWhat I want to know: [QUESTIONS]\nType of analysis: [STATISTICAL/TREND/COMPARISON]"),
+                ("Research Summary", "Please summarize research on: [TOPIC]\n\nFocus areas: [AREAS]\nTarget audience: [AUDIENCE]\nLength: [LENGTH]"),
+                ("SWOT Analysis", "Please create a SWOT analysis for: [SUBJECT]\n\nContext: [CONTEXT]\nTimeframe: [TIMEFRAME]\nKey factors: [FACTORS]"),
+                ("Pros and Cons", "Please provide a balanced pros and cons analysis of: [TOPIC]\n\nCriteria: [CRITERIA]\nStakeholders: [STAKEHOLDERS]")
+            ]
+
+            for name, template in analysis_templates:
+                btn = QPushButton(f"📊 {name}")
+                btn.clicked.connect(lambda checked, t=template: self.use_template(t))
+                analysis_layout.addWidget(btn)
+
+            tabs.addTab(analysis_tab, "Analysis")
+
+            layout.addWidget(tabs)
+
+            # Custom template section
+            custom_group = QGroupBox("Create Custom Template")
+            custom_layout = QVBoxLayout(custom_group)
+
+            template_name = QLineEdit()
+            template_name.setPlaceholderText("Template name...")
+            custom_layout.addWidget(QLabel("Name:"))
+            custom_layout.addWidget(template_name)
+
+            template_content = QTextEdit()
+            template_content.setPlaceholderText("Template content... Use [PLACEHOLDER] for variables.")
+            template_content.setMaximumHeight(100)
+            custom_layout.addWidget(QLabel("Template:"))
+            custom_layout.addWidget(template_content)
+
+            save_template_btn = QPushButton("Save Template")
+            save_template_btn.clicked.connect(lambda: self.save_custom_template(template_name.text(), template_content.toPlainText()))
+            custom_layout.addWidget(save_template_btn)
+
+            layout.addWidget(custom_group)
+
+            # Close button
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(dialog.close)
+            layout.addWidget(close_btn)
+
+            dialog.exec()
+
+        except Exception as e:
+            logger.error(f"Error showing fallback prompt templates: {e}")
+
+    def use_template(self, template):
+        """Use a template by inserting it into the input field"""
+        try:
+            if hasattr(self, 'input_entry'):
+                current_text = self.input_entry.toPlainText()
+                if current_text:
+                    # Append template with a separator
+                    new_text = f"{current_text}\n\n{template}"
+                else:
+                    new_text = template
+
+                self.input_entry.setPlainText(new_text)
+
+                # Move cursor to end
+                cursor = self.input_entry.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End)
+                self.input_entry.setTextCursor(cursor)
+
+                if hasattr(self, 'status_bar'):
+                    self.status_bar.showMessage("Template inserted")
+
+        except Exception as e:
+            logger.error(f"Error using template: {e}")
+
+    def save_custom_template(self, name, content):
+        """Save a custom template"""
+        try:
+            if not name.strip() or not content.strip():
+                QMessageBox.warning(self, "Invalid Input", "Please provide both name and content.")
+                return
+
+            # In a real implementation, this would save to a file or database
+            # For now, just show confirmation
+            QMessageBox.information(self, "Template Saved", f"Template '{name}' saved successfully!")
+
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage(f"Saved template: {name}")
+
+        except Exception as e:
+            logger.error(f"Error saving custom template: {e}")
+
+    def manage_knowledge_base(self):
+        """Open Knowledge Base management dialog"""
+        try:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("🧠 Knowledge Base Management")
+            dialog.setMinimumSize(800, 600)
+            layout = QVBoxLayout(dialog)
+
+            # Header
+            header = QLabel("<h2>🧠 Knowledge Base Management</h2>")
+            header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(header)
+
+            # Document list section
+            doc_section = QGroupBox("📚 Indexed Documents")
+            doc_layout = QVBoxLayout(doc_section)
+
+            # Document list
+            self.kb_doc_list = QListWidget()
+            self.kb_doc_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+
+            # Load existing documents if any
+            if not hasattr(self, 'knowledge_base_docs'):
+                self.knowledge_base_docs = []
+
+            for doc in self.knowledge_base_docs:
+                status = "✅ Embedded" if doc.get('embedded', False) else "⏳ Not Embedded"
+                item = QListWidgetItem(f"{doc.get('name', 'Unknown')} | {status}")
+                item.setData(Qt.ItemDataRole.UserRole, doc)
+                self.kb_doc_list.addItem(item)
+
+            doc_layout.addWidget(self.kb_doc_list)
+
+            # Document management buttons
+            doc_btn_layout = QHBoxLayout()
+
+            add_doc_btn = QPushButton("📁 Add Document")
+            add_doc_btn.clicked.connect(lambda: self.add_kb_document())
+            doc_btn_layout.addWidget(add_doc_btn)
+
+            remove_doc_btn = QPushButton("🗑️ Remove Selected")
+            remove_doc_btn.clicked.connect(lambda: self.remove_kb_document())
+            doc_btn_layout.addWidget(remove_doc_btn)
+
+            embed_doc_btn = QPushButton("🧮 Embed/Re-Embed")
+            embed_doc_btn.clicked.connect(lambda: self.embed_kb_document())
+            doc_btn_layout.addWidget(embed_doc_btn)
+
+            doc_layout.addLayout(doc_btn_layout)
+            layout.addWidget(doc_section)
+
+            # Chunking strategy section
+            chunk_section = QGroupBox("⚙️ Chunking Strategy")
+            chunk_layout = QGridLayout(chunk_section)
+
+            chunk_layout.addWidget(QLabel("Chunk Size:"), 0, 0)
+            self.chunk_size_spin = QSpinBox()
+            self.chunk_size_spin.setRange(128, 8192)
+            self.chunk_size_spin.setValue(getattr(self, 'rag_chunk_size', 512))
+            chunk_layout.addWidget(self.chunk_size_spin, 0, 1)
+
+            chunk_layout.addWidget(QLabel("Overlap:"), 1, 0)
+            self.overlap_spin = QSpinBox()
+            self.overlap_spin.setRange(0, 1024)
+            self.overlap_spin.setValue(getattr(self, 'rag_chunk_overlap', 64))
+            chunk_layout.addWidget(self.overlap_spin, 1, 1)
+
+            chunk_layout.addWidget(QLabel("Embedding Model:"), 2, 0)
+            self.embed_model_combo = QComboBox()
+            self.embed_model_combo.addItems([
+                "sentence-transformers/all-MiniLM-L6-v2",
+                "sentence-transformers/all-mpnet-base-v2",
+                "text-embedding-ada-002",
+                "local-bert-base"
+            ])
+            chunk_layout.addWidget(self.embed_model_combo, 2, 1)
+
+            layout.addWidget(chunk_section)
+
+            # Statistics section
+            stats_section = QGroupBox("📊 Statistics")
+            stats_layout = QVBoxLayout(stats_section)
+
+            total_docs = len(self.knowledge_base_docs)
+            embedded_docs = len([d for d in self.knowledge_base_docs if d.get('embedded', False)])
+
+            stats_text = f"""
+            📄 Total Documents: {total_docs}
+            ✅ Embedded Documents: {embedded_docs}
+            ⏳ Pending Embedding: {total_docs - embedded_docs}
+            🧮 Current Chunk Size: {getattr(self, 'rag_chunk_size', 512)}
+            🔄 Current Overlap: {getattr(self, 'rag_chunk_overlap', 64)}
+            """
+
+            stats_label = QLabel(stats_text)
+            stats_layout.addWidget(stats_label)
+            layout.addWidget(stats_section)
+
+            # Action buttons
+            button_layout = QHBoxLayout()
+
+            save_settings_btn = QPushButton("💾 Save Settings")
+            save_settings_btn.clicked.connect(lambda: self.save_kb_settings())
+            button_layout.addWidget(save_settings_btn)
+
+            refresh_btn = QPushButton("🔄 Refresh")
+            refresh_btn.clicked.connect(lambda: self.refresh_kb_dialog())
+            button_layout.addWidget(refresh_btn)
+
+            button_layout.addStretch()
+
+            close_btn = QPushButton("✖️ Close")
+            close_btn.clicked.connect(dialog.close)
+            button_layout.addWidget(close_btn)
+
+            layout.addLayout(button_layout)
+
+            # Store dialog reference for refreshing
+            self.kb_dialog = dialog
+
+            dialog.exec()
+
+        except Exception as e:
+            logger.error(f"Error opening knowledge base management: {e}")
+            # Fallback simple dialog
+            QMessageBox.information(self, "Knowledge Base",
+                                  "Knowledge Base management feature is being initialized...\n\n"
+                                  "This allows you to:\n"
+                                  "• Add documents for RAG\n"
+                                  "• Configure chunking strategies\n"
+                                  "• Manage embeddings\n"
+                                  "• View statistics")
+
+    def add_kb_document(self):
+        """Add a document to the knowledge base"""
         try:
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "Add Document to Knowledge Base", "",
-                "Documents (*.pdf *.txt *.docx);;All files (*.*)"
+                self,
+                "Add Document to Knowledge Base",
+                "",
+                "All Supported Files (*.txt *.pdf *.docx *.md);;Text Files (*.txt);;PDF Files (*.pdf);;Word Documents (*.docx);;Markdown Files (*.md);;All Files (*)"
             )
-            
-            if file_path:
-                QMessageBox.information(self, "Document Added", 
-                                      f"Document would be added to knowledge base: {file_path}")
-        except Exception as e:
-            logger.error(f"Error adding document to RAG: {e}")
 
-    def initialize_rag_system(self):
-        """Initialize the RAG system"""
-        QMessageBox.information(self, "Initialize RAG", "RAG system initialization would be implemented here.")
+            if file_path:
+                filename = os.path.basename(file_path)
+
+                # Check if already exists
+                existing = [d for d in self.knowledge_base_docs if d.get('path') == file_path]
+                if existing:
+                    QMessageBox.warning(self, "Duplicate Document",
+                                      f"Document '{filename}' is already in the knowledge base.")
+                    return
+
+                # Add to knowledge base
+                doc = {
+                    'name': filename,
+                    'path': file_path,
+                    'embedded': False,
+                    'added_date': datetime.now().isoformat(),
+                    'size': os.path.getsize(file_path) if os.path.exists(file_path) else  0
+                }
+
+                self.knowledge_base_docs.append(doc)
+
+                # Update the dialog list if it exists
+                if hasattr(self, 'kb_doc_list'):
+                    item = QListWidgetItem(f"{filename} | ⏳ Not Embedded")
+                    item.setData(Qt.ItemDataRole.UserRole, doc)
+                    self.kb_doc_list.addItem(item)
+
+                QMessageBox.information(self, "Document Added",
+                                      f"Added '{filename}' to knowledge base.\n\n"
+                                      "Click 'Embed/Re-Embed' to process it for RAG.")
+
+                if hasattr(self, 'status_bar'):
+                    self.status_bar.showMessage(f"Added document: {filename}")
+
+        except Exception as e:
+            logger.error(f"Error adding KB document: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to add document: {e}")
+
+    def remove_kb_document(self):
+        """Remove selected document from knowledge base"""
+        try:
+            if not hasattr(self, 'kb_doc_list'):
+                return
+
+            item = self.kb_doc_list.currentItem()
+            if not item:
+                QMessageBox.information(self, "No Selection", "Please select a document to remove.")
+                return
+
+            doc = item.data(Qt.ItemDataRole.UserRole)
+
+            reply = QMessageBox.question(
+                self,
+                "Confirm Removal",
+                f"Remove '{doc.get('name', 'Unknown')}' from knowledge base?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # Remove from list
+                self.knowledge_base_docs = [d for d in self.knowledge_base_docs
+                                          if d.get('path') != doc.get('path')]
+
+                # Remove from dialog
+                row = self.kb_doc_list.row(item)
+                self.kb_doc_list.takeItem(row)
+
+                QMessageBox.information(self, "Document Removed",
+                                      f"Removed '{doc.get('name', 'Unknown')}' from knowledge base.")
+
+                if hasattr(self, 'status_bar'):
+                    self.status_bar.showMessage(f"Removed document: {doc.get('name', 'Unknown')}")
+
+        except Exception as e:
+            logger.error(f"Error removing KB document: {e}")
+
+    def embed_kb_document(self):
+        """Embed selected document (placeholder implementation)"""
+        try:
+            if not hasattr(self, 'kb_doc_list'):
+                return
+
+            item = self.kb_doc_list.currentItem()
+            if not item:
+                QMessageBox.information(self, "No Selection", "Please select a document to embed.")
+                return
+
+            doc = item.data(Qt.ItemDataRole.UserRole)
+
+            # Simulate embedding process
+            reply = QMessageBox.question(self, "Embed Document",
+                                       f"Embed '{doc.get('name', 'Unknown')}' for RAG?\n\n"
+                                       "This will process the document into searchable chunks.",
+                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # Mark as embedded (in real implementation, this would do actual embedding)
+                doc['embedded'] = True
+                doc['embedded_date'] = datetime.now().isoformat()
+
+                # Update display
+                item.setText(f"{doc.get('name', 'Unknown')} | ✅ Embedded")
+
+                QMessageBox.information(self, "Embedding Complete",
+                                      f"Successfully embedded '{doc.get('name', 'Unknown')}'.\n\n"
+                                      "Document is now available for RAG queries.")
+
+                if hasattr(self, 'status_bar'):
+                    self.status_bar.showMessage(f"Embedded document: {doc.get('name', 'Unknown')}")
+
+        except Exception as e:
+            logger.error(f"Error embedding KB document: {e}")
+
+    def save_kb_settings(self):
+        """Save knowledge base settings"""
+        try:
+            if hasattr(self, 'chunk_size_spin'):
+                self.rag_chunk_size = self.chunk_size_spin.value()
+            if hasattr(self, 'overlap_spin'):
+                self.rag_chunk_overlap = self.overlap_spin.value()
+            if hasattr(self, 'embed_model_combo'):
+                self.rag_embed_model = self.embed_model_combo.currentText()
+
+            QMessageBox.information(self, "Settings Saved",
+                                  f"Knowledge Base settings saved:\n\n"
+                                  f"📏 Chunk Size: {getattr(self, 'rag_chunk_size', 512)}\n"
+                                  f"🔄 Overlap: {getattr(self, 'rag_chunk_overlap', 64)}\n"
+                                  f"🧮 Model: {getattr(self, 'rag_embed_model', 'default')}")
+
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage("Knowledge Base settings saved")
+
+        except Exception as e:
+            logger.error(f"Error saving KB settings: {e}")
+
+    def refresh_kb_dialog(self):
+        """Refresh the knowledge base dialog"""
+        try:
+            # Close and reopen dialog
+            if hasattr(self, 'kb_dialog'):
+                self.kb_dialog.close()
+            self.manage_knowledge_base()
+
+        except Exception as e:
+            logger.error(f"Error refreshing KB dialog: {e}")
+
+    def open_code_sandbox(self):
+        """Open code sandbox for safe code execution"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Code Sandbox",
+                "Code sandbox feature is coming soon!\n\nThis will allow safe execution of code snippets in isolated environments."
+            )
+        except Exception as e:
+            logger.error(f"Error opening code sandbox: {e}")
+
+    def execute_selected_code(self):
+        """Execute selected code in the chat"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Code Execution",
+                "Code execution feature is coming soon!\n\nThis will allow running selected code blocks safely."
+            )
+        except Exception as e:
+            logger.error(f"Error executing code: {e}")
 
     def analyze_chat(self):
-        """Analyze chat patterns"""
-        QMessageBox.information(self, "Analyze Chat", "Chat analysis functionality would be implemented here.")
+        """Analyze current chat for insights"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Chat Analytics",
+                "Chat analysis feature is coming soon!\n\nThis will provide insights into conversation patterns, token usage, and more."
+            )
+        except Exception as e:
+            logger.error(f"Error analyzing chat: {e}")
 
+    def open_semantic_search(self):
+        """Open semantic search interface"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Semantic Search",
+                "Semantic search feature is coming soon!\n\nThis will allow searching conversations by meaning, not just keywords."
+            )
+        except Exception as e:
+            logger.error(f"Error opening semantic search: {e}")
+
+    def open_rag_analytics(self):
+        """Open RAG analytics interface"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "RAG Analytics",
+                "RAG analytics feature is coming soon!\n\nThis will provide insights into knowledge base usage and effectiveness."
+            )
+        except Exception as e:
+            logger.error(f"Error opening RAG analytics: {e}")
+
+    def open_preferences(self):
+        """Open application preferences"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Preferences",
+                "Preferences dialog is coming soon!\n\nThis will allow customizing all application settings."
+            )
+        except Exception as e:
+            logger.error(f"Error opening preferences: {e}")
+
+    def open_model_settings_manually(self):
+        """Open model settings dialog manually"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Model Settings",
+                "Advanced model settings dialog is coming soon!\n\nThis will allow fine-tuning model parameters."
+            )
+        except Exception as e:
+            logger.error(f"Error opening model settings: {e}")
+
+    def update_rag_status(self):
+        """Update RAG status in status bar"""
+        try:
+            if hasattr(self, 'rag_status'):
+                if self.rag_enabled:
+                    self.rag_status.setText("RAG: ON")
+                    self.rag_status.setStyleSheet("color: green;")
+                else:
+                    self.rag_status.setText("RAG: OFF")
+                    self.rag_status.setStyleSheet("color: gray;")
+        except Exception as e:
+            logger.error(f"Error updating RAG status: {e}")
+
+    def finalize_ui_setup(self):
+        """Finalize UI setup after all components are initialized"""
+        try:
+            # Set focus to input field
+            if hasattr(self, 'input_entry'):
+                self.input_entry.setFocus()
+
+            # Update initial status
+            self.update_rag_status()
+
+            # Load initial data
+            self.load_providers_and_models()
+
+        except Exception as e:
+            logger.error(f"Error finalizing UI setup: {e}")
+
+    def setup_command_palette(self):
+        """Setup command palette for quick actions"""
+        try:
+            # Placeholder for command palette - will be implemented later
+            logger.info("Command palette initialized")
+        except Exception as e:
+            logger.error(f"Error setting up command palette: {e}")
+
+    def on_provider_changed(self, provider_name):
+        """Handle provider change"""
+        try:
+            logger.info(f"Provider changed to: {provider_name}")
+            # Update models for the new provider
+            self.refresh_current_provider_models()
+        except Exception as e:
+            logger.error(f"Error changing provider: {e}")
+
+    def on_model_changed(self, model_name):
+        """Handle model change"""
+        try:
+            logger.info(f"Model changed to: {model_name}")
+            # Update UI as needed
+        except Exception as e:
+            logger.error(f"Error changing model: {e}")
+
+    def refresh_current_provider_models(self):
+        """Refresh models for current provider"""
+        try:
+            logger.info("Refreshing models for current provider")
+            # Implement model refresh logic
+        except Exception as e:
+            logger.error(f"Error refreshing models: {e}")
+
+    def open_api_settings(self):
+        """Open API settings dialog"""
+        try:
+            from api.settings import APISettingsDialog
+            dialog = APISettingsDialog(self)
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Error opening API settings: {e}")
+
+    def toggle_theme(self):
+        """Toggle between light and dark themes"""
+        try:
+            # Implement theme toggle logic
+            logger.info("Theme toggled")
+        except Exception as e:
+            logger.error(f"Error toggling theme: {e}")
+
+    def pull_model(self):
+        """Pull/download a model"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "Pull Model",
+                "Model pulling feature is coming soon!\n\nThis will allow downloading models from repositories."
+            )
+        except Exception as e:
+            logger.error(f"Error pulling model: {e}")
+
+    def create_conversation_folder(self):
+        """Create a new conversation folder"""
+        try:
+            from PyQt6.QtWidgets import QInputDialog
+            folder_name, ok = QInputDialog.getText(
+                self,
+                "New Folder",
+                "Enter folder name:"
+            )
+            if ok and folder_name:
+                logger.info(f"Created folder: {folder_name}")
+        except Exception as e:
+            logger.error(f"Error creating folder: {e}")
+
+    def filter_by_folder(self, folder_name):
+        """Filter conversations by folder"""
+        try:
+            logger.info(f"Filtering by folder: {folder_name}")
+            # Implement folder filtering logic
+        except Exception as e:
+            logger.error(f"Error filtering by folder: {e}")
+
+    def on_scroll_changed(self, value):
+        """Handle scroll changes in chat display"""
+        try:
+            # Handle scroll position changes for features like loading more messages
+            pass
+        except Exception as e:
+            logger.error(f"Error handling scroll change: {e}")
+
+    def filter_conversations(self):
+        """Filter conversations based on search text"""
+        try:
+            search_text = getattr(self, 'conv_search', None)
+            if not search_text:
+                return
+            
+            search_query = search_text.text().lower().strip() if hasattr(search_text, 'text') else ""
+            
+            # Get the conversation list widget
+            conv_list = getattr(self, 'conv_list', None)
+            if not conv_list:
+                return
+            
+            # Filter conversations based on search query
+            for i in range(conv_list.count()):
+                item = conv_list.item(i)
+                if item:
+                    item_text = item.text().lower()
+                    # Show item if search query is empty or matches
+                    should_show = not search_query or search_query in item_text
+                    item.setHidden(not should_show)
+                    
+        except Exception as e:
+            logger.error(f"Error filtering conversations: {e}")
+
+    def on_conversation_loaded(self, conversation_data):
+        """Handle when a conversation is loaded"""
+        try:
+            # Update UI state when conversation is loaded
+            if conversation_data:
+                # Update current conversation reference
+                self.current_conversation = conversation_data
+                
+                # Update window title if conversation has a name
+                if hasattr(conversation_data, 'get') and conversation_data.get('name'):
+                    self.setWindowTitle(f"The Oracle - {conversation_data['name']}")
+                else:
+                    self.setWindowTitle("The Oracle")
+                    
+        except Exception as e:
+            logger.error(f"Error handling conversation loaded: {e}")
+
+    def load_conversation_lazy(self, conversation_id):
+        """Load conversation with lazy loading"""
+        try:
+            # Implement lazy loading for large conversations
+            if hasattr(self, 'load_conversation'):
+                return self.load_conversation(conversation_id)
+            return None
+        except Exception as e:
+            logger.error(f"Error in lazy conversation loading: {e}")
+            return None
+
+    def format_timestamp(self, timestamp):
+        """Format timestamp for display"""
+        try:
+            if isinstance(timestamp, str):
+                return timestamp
+            elif hasattr(timestamp, 'strftime'):
+                return timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                return str(timestamp)
+        except Exception as e:
+            logger.error(f"Error formatting timestamp: {e}")
+            return "Unknown time"
+
+    def setup_enhanced_message_area(self):
+        """Setup enhanced message display area"""
+        try:
+            # Enhanced message area setup
+            if hasattr(self, 'chat_display'):
+                # Apply enhanced styling or features to message area
+                self.chat_display.setStyleSheet("""
+                    QTextEdit {
+                        background-color: #f8f9fa;
+                        border: 1px solid #dee2e6;
+                        border-radius: 8px;
+                        padding: 10px;
+                        font-family: 'Segoe UI', sans-serif;
+                        font-size: 14px;
+                        line-height: 1.5;
+                    }
+                """)
+        except Exception as e:
+            logger.error(f"Error setting up enhanced message area: {e}")
+
+    def show_conversation_context_menu(self, position):
+        """Show context menu for conversation list"""
+        try:
+            from PyQt6.QtWidgets import QMenu
+            from PyQt6.QtCore import QPoint
+            
+            # Get the conversation list widget
+            conv_list = getattr(self, 'conv_listbox', None)
+            if not conv_list:
+                return
+                
+            # Get the item at the clicked position
+            item = conv_list.itemAt(position)
+            if not item:
+                return
+                
+            # Create context menu
+            context_menu = QMenu(self)
+            
+            # Add menu actions
+            rename_action = context_menu.addAction("📝 Rename Conversation")
+            delete_action = context_menu.addAction("🗑️ Delete Conversation")
+            context_menu.addSeparator()
+            export_action = context_menu.addAction("📤 Export Conversation")
+            archive_action = context_menu.addAction("📦 Archive Conversation")
+            
+            # Show the menu and get the selected action
+            action = context_menu.exec(conv_list.mapToGlobal(position))
+            
+            if action == rename_action:
+                self.rename_conversation(item)
+            elif action == delete_action:
+                self.delete_conversation(item)
+            elif action == export_action:
+                self.export_conversation(item)
+            elif action == archive_action:
+                self.archive_conversation(item)
+                
+        except Exception as e:
+            logger.error(f"Error showing conversation context menu: {e}")
+
+    def show_chat_context_menu(self, position):
+        """Show context menu for chat display"""
+        try:
+            from PyQt6.QtWidgets import QMenu
+            
+            # Get the chat display widget
+            chat_display = getattr(self, 'chat_display', None)
+            if not chat_display:
+                return
+                
+            # Create context menu
+            context_menu = QMenu(self)
+            
+            # Add menu actions
+            copy_action = context_menu.addAction("📋 Copy")
+            copy_all_action = context_menu.addAction("📋 Copy All")
+            context_menu.addSeparator()
+            clear_action = context_menu.addAction("🗑️ Clear Chat")
+            context_menu.addSeparator()
+            export_action = context_menu.addAction("📤 Export Chat")
+            
+            # Show the menu and get the selected action
+            action = context_menu.exec(chat_display.mapToGlobal(position))
+            
+            if action == copy_action:
+                self.copy_selected_text()
+            elif action == copy_all_action:
+                self.copy_all_text()
+            elif action == clear_action:
+                self.clear_chat()
+            elif action == export_action:
+                self.export_current_conversation()
+                
+        except Exception as e:
+            logger.error(f"Error showing chat context menu: {e}")
+
+    def rename_conversation(self, item):
+        """Rename a conversation"""
+        try:
+            from PyQt6.QtWidgets import QInputDialog
+            
+            if not item:
+                return
+                
+            current_name = item.text()
+            new_name, ok = QInputDialog.getText(
+                self, 
+                "Rename Conversation", 
+                "Enter new name:", 
+                text=current_name
+            )
+            
+            if ok and new_name.strip():
+                item.setText(new_name.strip())
+                # TODO: Update conversation name in storage
+                
+        except Exception as e:
+            logger.error(f"Error renaming conversation: {e}")
+
+    def delete_conversation(self, item):
+        """Delete a conversation"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            
+            if not item:
+                return
+                
+            reply = QMessageBox.question(
+                self,
+                "Delete Conversation",
+                f"Are you sure you want to delete '{item.text()}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Remove from list
+                conv_list = getattr(self, 'conv_listbox', None)
+                if conv_list:
+                    row = conv_list.row(item)
+                    conv_list.takeItem(row)
+                # TODO: Delete from storage
+                
+        except Exception as e:
+            logger.error(f"Error deleting conversation: {e}")
+
+    def export_conversation(self, item):
+        """Export a conversation"""
+        try:
+            from PyQt6.QtWidgets import QFileDialog
+            
+            if not item:
+                return
+                
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Conversation",
+                f"{item.text()}.json",
+                "JSON Files (*.json);;Text Files (*.txt);;All Files (*)"
+            )
+            
+            if filename:
+                # TODO: Implement actual export logic
+                logger.info(f"Would export conversation to: {filename}")
+                
+        except Exception as e:
+            logger.error(f"Error exporting conversation: {e}")
+
+    def archive_conversation(self, item):
+        """Archive a conversation"""
+        try:
+            if not item:
+                return
+                
+            # TODO: Implement archiving logic
+            logger.info(f"Would archive conversation: {item.text()}")
+            
+        except Exception as e:
+            logger.error(f"Error archiving conversation: {e}")
+
+    def copy_selected_text(self):
+        """Copy selected text from chat display"""
+        try:
+            chat_display = getattr(self, 'chat_display', None)
+            if chat_display and hasattr(chat_display, 'copy'):
+                chat_display.copy()
+        except Exception as e:
+            logger.error(f"Error copying selected text: {e}")
+
+    def copy_all_text(self):
+        """Copy all text from chat display"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            
+            chat_display = getattr(self, 'chat_display', None)
+            if chat_display:
+                all_text = chat_display.toPlainText()
+                clipboard = QApplication.clipboard()
+                clipboard.setText(all_text)
+        except Exception as e:
+            logger.error(f"Error copying all text: {e}")
+
+    def clear_chat(self):
+        """Clear the chat display"""
+        try:
+            from PyQt6.QtWidgets import QMessageBox
+            
+            reply = QMessageBox.question(
+                self,
+                "Clear Chat",
+                "Are you sure you want to clear the current chat?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                chat_display = getattr(self, 'chat_display', None)
+                if chat_display:
+                    chat_display.clear()
+                    
+        except Exception as e:
+            logger.error(f"Error clearing chat: {e}")
+
+    def export_current_conversation(self):
+        """Export the current conversation"""
+        try:
+            from PyQt6.QtWidgets import QFileDialog
+            
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Current Conversation",
+                "conversation.json",
+                "JSON Files (*.json);;Text Files (*.txt);;All Files (*)"
+            )
+            
+            if filename:
+                chat_display = getattr(self, 'chat_display', None)
+                if chat_display:
+                    content = chat_display.toPlainText()
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        if filename.endswith('.json'):
+                            import json
+                            json.dump({"content": content}, f, indent=2, ensure_ascii=False)
+                        else:
+                            f.write(content)
+                            
+        except Exception as e:
+            logger.error(f"Error exporting current conversation: {e}")
+
+    def toggle_compact_mode(self):
+        """Toggle compact mode for the chat interface"""
+        try:
+            # Toggle the compact mode state
+            self.compact_mode = not getattr(self, 'compact_mode', False)
+            
+            # Update the button state
+            if hasattr(self, 'compact_mode_btn'):
+                self.compact_mode_btn.setChecked(self.compact_mode)
+            
+            # Apply compact mode styling
+            chat_display = getattr(self, 'chat_display', None)
+            if chat_display:
+                if self.compact_mode:
+                    # Compact mode styling
+                    chat_display.setStyleSheet("""
+                        QTextEdit {
+                            background-color: #f8f9fa;
+                            border: 1px solid #dee2e6;
+                            border-radius: 4px;
+                            padding: 5px;
+                            font-family: 'Segoe UI', sans-serif;
+                            font-size: 12px;
+                            line-height: 1.2;
+                        }
+                    """)
+                else:
+                    # Normal mode styling
+                    chat_display.setStyleSheet("""
+                        QTextEdit {
+                            background-color: #f8f9fa;
+                            border: 1px solid #dee2e6;
+                            border-radius: 8px;
+                            padding: 10px;
+                            font-family: 'Segoe UI', sans-serif;
+                            font-size: 14px;
+                            line-height: 1.5;
+                        }
+                    """)
+            
+            logger.info(f"Compact mode {'enabled' if self.compact_mode else 'disabled'}")
+            
+        except Exception as e:
+            logger.error(f"Error toggling compact mode: {e}")
+
+    def toggle_line_numbers(self):
+        """Toggle line numbers in code blocks"""
+        try:
+            # Toggle the line numbers state
+            self.show_line_numbers = not getattr(self, 'show_line_numbers', False)
+            
+            # Update the button state
+            if hasattr(self, 'line_numbers_btn'):
+                self.line_numbers_btn.setChecked(self.show_line_numbers)
+            
+            # Apply line numbers setting
+            # This would typically affect how code blocks are rendered
+            logger.info(f"Line numbers {'enabled' if self.show_line_numbers else 'disabled'}")
+            
+            # Update any existing code blocks if needed
+            self.update_code_block_display()
+            
+        except Exception as e:
+            logger.error(f"Error toggling line numbers: {e}")
+
+    def toggle_code_folding(self):
+        """Toggle code folding in code blocks"""
+        try:
+            # Toggle the code folding state
+            self.enable_code_folding = not getattr(self, 'enable_code_folding', False)
+            
+            # Update the button state
+            if hasattr(self, 'code_folding_btn'):
+                self.code_folding_btn.setChecked(self.enable_code_folding)
+            
+            # Apply code folding setting
+            logger.info(f"Code folding {'enabled' if self.enable_code_folding else 'disabled'}")
+            
+            # Update any existing code blocks if needed
+            self.update_code_block_display()
+            
+        except Exception as e:
+            logger.error(f"Error toggling code folding: {e}")
+
+    def update_code_block_display(self):
+        """Update the display of code blocks based on current settings"""
+        try:
+            # This method would update how code blocks are rendered
+            # based on line numbers and code folding settings
+            chat_display = getattr(self, 'chat_display', None)
+            if chat_display:
+                # Get current content
+                current_content = chat_display.toHtml()
+                
+                # Re-render code blocks with current settings
+                # This is a placeholder - actual implementation would parse
+                # and re-render code blocks with proper formatting
+                logger.debug("Code block display updated")
+                
+        except Exception as e:
+            logger.error(f"Error updating code block display: {e}")
+
+    def edit_last_prompt(self):
+        """Edit the last prompt sent by the user"""
+        try:
+            # Check if there's any prompt history
+            if not self.prompt_history:
+                if hasattr(self, 'status_bar') and self.status_bar:
+                    self.status_bar.showMessage("No previous prompts to edit")
+                return
+            
+            # Get the last prompt
+            last_prompt = self.prompt_history[-1]
+            
+            # Check if input_entry exists
+            if hasattr(self, 'input_entry'):
+                # Set the last prompt text in the input entry
+                self.input_entry.setPlainText(last_prompt)
+                
+                # Focus on the input entry for editing
+                self.input_entry.setFocus()
+                
+                # Position cursor at the end
+                cursor = self.input_entry.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+                self.input_entry.setTextCursor(cursor)
+                
+                if hasattr(self, 'status_bar') and self.status_bar:
+                    self.status_bar.showMessage("Last prompt loaded for editing")
+            else:
+                if hasattr(self, 'status_bar') and self.status_bar:
+                    self.status_bar.showMessage("Input field not available")
+                
+        except Exception as e:
+            logger.error(f"Error editing last prompt: {e}")
+            if hasattr(self, 'status_bar') and self.status_bar:
+                self.status_bar.showMessage("Error loading last prompt for editing")

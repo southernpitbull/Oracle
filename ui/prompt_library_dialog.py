@@ -17,58 +17,65 @@ from PyQt6.QtWidgets import (
     QMenu, QHeaderView
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QFont
+from PyQt6.QtGui import QAction, QFont, QIcon
+from .theme_styles import get_dialog_theme_styles, get_icon_path, create_themed_message_box
 
 
 class PromptLibraryDialog(QDialog):
     """Dialog for managing prompt library with categories and search functionality."""
-    
+
     prompt_selected = pyqtSignal(str)  # Emitted when a prompt is selected for insertion
-    
-    def __init__(self, parent=None):
+
+    def __init__(self, parent=None, dark_theme=True):
         super().__init__(parent)
+        self.dark_theme = dark_theme
         self.setWindowTitle("Prompt Library")
         self.setModal(False)
         self.resize(800, 600)
-        
+
+        # Set window icon
+        icon_path = get_icon_path("chat", "chat")
+        if icon_path:
+            self.setWindowIcon(QIcon(icon_path))
+
         # Data storage
         self.prompts_file = Path("prompts_library.json")
         self.prompts_data = self.load_prompts()
-        
+
         # UI setup
         self.setup_ui()
         self.setup_connections()
         self.load_prompts_to_tree()
-        
+
         # Apply styling
-        self.setup_styles()
-    
+        self.apply_theme_styles()
+
     def setup_ui(self):
         """Set up the user interface."""
         layout = QVBoxLayout(self)
-        
+
         # Search and filter section
         search_layout = QHBoxLayout()
-        
+
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search prompts...")
         search_layout.addWidget(QLabel("Search:"))
         search_layout.addWidget(self.search_edit)
-        
+
         self.category_filter = QComboBox()
         self.category_filter.addItem("All Categories")
         search_layout.addWidget(QLabel("Category:"))
         search_layout.addWidget(self.category_filter)
-        
+
         layout.addLayout(search_layout)
-        
+
         # Main content splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        
+
         # Left side - prompt tree
         left_widget = QGroupBox("Prompt Library")
         left_layout = QVBoxLayout(left_widget)
-        
+
         # Tree widget for prompts
         self.prompt_tree = QTreeWidget()
         self.prompt_tree.setHeaderLabels(["Name", "Category", "Description"])
@@ -80,155 +87,148 @@ class PromptLibraryDialog(QDialog):
         self.prompt_tree.setAlternatingRowColors(True)
         self.prompt_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         left_layout.addWidget(self.prompt_tree)
-        
+
         # Tree buttons
         tree_buttons = QHBoxLayout()
         self.add_prompt_btn = QPushButton("Add Prompt")
         self.add_category_btn = QPushButton("Add Category")
         self.delete_btn = QPushButton("Delete")
         self.use_prompt_btn = QPushButton("Use Prompt")
-        
+
         tree_buttons.addWidget(self.add_prompt_btn)
         tree_buttons.addWidget(self.add_category_btn)
         tree_buttons.addWidget(self.delete_btn)
         tree_buttons.addStretch()
         tree_buttons.addWidget(self.use_prompt_btn)
-        
+
         left_layout.addLayout(tree_buttons)
         splitter.addWidget(left_widget)
-        
+
         # Right side - prompt editor
         right_widget = QGroupBox("Prompt Details")
         right_layout = QFormLayout(right_widget)
-        
+
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Prompt name")
         right_layout.addRow("Name:", self.name_edit)
-        
+
         self.category_edit = QComboBox()
         self.category_edit.setEditable(True)
         self.category_edit.setPlaceholderText("Category name")
         right_layout.addRow("Category:", self.category_edit)
-        
+
         self.description_edit = QLineEdit()
         self.description_edit.setPlaceholderText("Brief description")
         right_layout.addRow("Description:", self.description_edit)
-        
+
         self.content_edit = QTextEdit()
         self.content_edit.setPlaceholderText("Enter your prompt here...")
         self.content_edit.setFont(QFont("Consolas", 10))
         right_layout.addRow("Content:", self.content_edit)
-        
+
         # Editor buttons
         editor_buttons = QHBoxLayout()
         self.save_btn = QPushButton("Save Changes")
         self.revert_btn = QPushButton("Revert")
         self.preview_btn = QPushButton("Preview")
-        
+
         editor_buttons.addWidget(self.save_btn)
         editor_buttons.addWidget(self.revert_btn)
         editor_buttons.addStretch()
         editor_buttons.addWidget(self.preview_btn)
-        
+
         right_layout.addRow(editor_buttons)
-        
+
         splitter.addWidget(right_widget)
         splitter.setSizes([400, 400])
-        
+
         layout.addWidget(splitter)
-        
+
         # Dialog buttons
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Close
         )
         layout.addWidget(button_box)
-        
+
         # Store references
         self.button_box = button_box
         self.splitter = splitter
-        
+
         # Initially disable editor
         self.set_editor_enabled(False)
-    
+
     def setup_connections(self):
         """Set up signal connections."""
         # Search and filter
         self.search_edit.textChanged.connect(self.filter_prompts)
         self.category_filter.currentTextChanged.connect(self.filter_prompts)
-        
+
         # Tree interactions
         self.prompt_tree.itemSelectionChanged.connect(self.on_selection_changed)
         self.prompt_tree.itemDoubleClicked.connect(self.use_selected_prompt)
         self.prompt_tree.customContextMenuRequested.connect(self.show_context_menu)
-        
+
         # Buttons
         self.add_prompt_btn.clicked.connect(self.add_new_prompt)
         self.add_category_btn.clicked.connect(self.add_new_category)
         self.delete_btn.clicked.connect(self.delete_selected)
         self.use_prompt_btn.clicked.connect(self.use_selected_prompt)
-        
+
         self.save_btn.clicked.connect(self.save_current_prompt)
         self.revert_btn.clicked.connect(self.revert_changes)
         self.preview_btn.clicked.connect(self.preview_prompt)
-        
+
         # Dialog
         self.button_box.rejected.connect(self.close)
-    
-    def setup_styles(self):
-        """Apply styling to the dialog."""
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #2b2b2b;
-                color: #ffffff;
-            }
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #555555;
-                border-radius: 5px;
-                margin: 5px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px 0 5px;
-            }
+
+    def apply_theme_styles(self):
+        """Apply theme-aware styling to the dialog"""
+        dialog_styles = get_dialog_theme_styles(self.dark_theme)
+
+        # Apply dialog-wide styles
+        self.setStyleSheet(dialog_styles + """
             QTreeWidget {
-                background-color: #3c3c3c;
-                border: 1px solid #555555;
-                border-radius: 3px;
-                alternate-background-color: #404040;
-            }
-            QTreeWidget::item:selected {
-                background-color: #0078d4;
-            }
-            QLineEdit, QComboBox, QTextEdit {
-                background-color: #404040;
-                border: 1px solid #555555;
-                border-radius: 3px;
+                border-radius: 5px;
+                alternate-background-color: transparent;
                 padding: 5px;
-                color: #ffffff;
             }
-            QPushButton {
-                background-color: #0078d4;
-                border: none;
+
+            QTreeWidget::item {
+                padding: 8px;
                 border-radius: 3px;
-                padding: 8px 16px;
-                color: white;
+                margin: 1px;
+            }
+
+            QTreeWidget::item:selected {
                 font-weight: bold;
             }
-            QPushButton:hover {
-                background-color: #106ebe;
+
+            QLineEdit, QComboBox, QTextEdit {
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
             }
-            QPushButton:pressed {
-                background-color: #005a9e;
+
+            QPushButton {
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+                min-width: 80px;
             }
+
             QPushButton:disabled {
-                background-color: #555555;
-                color: #888888;
+                opacity: 0.5;
+            }
+
+            QLabel {
+                font-size: 12px;
+            }
+
+            QSplitter::handle {
+                border-radius: 2px;
             }
         """)
-    
+
     def load_prompts(self) -> Dict:
         """Load prompts from JSON file."""
         if self.prompts_file.exists():
@@ -237,7 +237,7 @@ class PromptLibraryDialog(QDialog):
                     return json.load(f)
             except Exception as e:
                 print(f"Error loading prompts: {e}")
-        
+
         # Return default structure with some sample prompts
         return {
             "categories": {
@@ -299,32 +299,36 @@ class PromptLibraryDialog(QDialog):
                 }
             }
         }
-    
+
     def save_prompts(self):
         """Save prompts to JSON file."""
         try:
             with open(self.prompts_file, 'w', encoding='utf-8') as f:
                 json.dump(self.prompts_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            QMessageBox.warning(self, "Save Error", f"Failed to save prompts: {e}")
-    
+            create_themed_message_box(
+                self, "Save Error",
+                f"Failed to save prompts: {e}",
+                "error", self.dark_theme
+            ).exec()
+
     def load_prompts_to_tree(self):
         """Load prompts into the tree widget."""
         self.prompt_tree.clear()
         self.category_filter.clear()
         self.category_filter.addItem("All Categories")
         self.category_edit.clear()
-        
+
         categories = self.prompts_data.get("categories", {})
-        
+
         for category_name, prompts in categories.items():
             self.category_filter.addItem(category_name)
             self.category_edit.addItem(category_name)
-            
+
             category_item = QTreeWidgetItem([category_name, "", ""])
             category_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "category", "name": category_name})
             self.prompt_tree.addTopLevelItem(category_item)
-            
+
             for prompt_name, prompt_data in prompts.items():
                 prompt_item = QTreeWidgetItem([
                     prompt_name,
@@ -338,91 +342,91 @@ class PromptLibraryDialog(QDialog):
                     "data": prompt_data
                 })
                 category_item.addChild(prompt_item)
-        
+
         self.prompt_tree.expandAll()
-    
+
     def filter_prompts(self):
         """Filter prompts based on search text and category."""
         search_text = self.search_edit.text().lower()
         selected_category = self.category_filter.currentText()
-        
+
         def should_show_item(item):
             user_data = item.data(0, Qt.ItemDataRole.UserRole)
             if not user_data:
                 return False
-            
+
             if user_data["type"] == "category":
                 category_name = user_data["name"]
                 if selected_category != "All Categories" and category_name != selected_category:
                     return False
-                
+
                 # Show category if any child matches
                 for i in range(item.childCount()):
                     if should_show_item(item.child(i)):
                         return True
                 return False
-            
+
             elif user_data["type"] == "prompt":
                 category_name = user_data["category"]
                 prompt_name = user_data["name"]
                 description = user_data["data"].get("description", "")
-                
+
                 # Category filter
                 if selected_category != "All Categories" and category_name != selected_category:
                     return False
-                
+
                 # Search filter
                 if search_text:
                     searchable_text = f"{prompt_name} {description}".lower()
                     if search_text not in searchable_text:
                         return False
-                
+
                 return True
-            
+
             return False
-        
+
         # Hide/show items based on filter
         for i in range(self.prompt_tree.topLevelItemCount()):
             category_item = self.prompt_tree.topLevelItem(i)
             if not category_item:
                 continue
-                
+
             category_visible = False
-            
+
             for j in range(category_item.childCount()):
                 prompt_item = category_item.child(j)
                 if not prompt_item:
                     continue
-                    
+
                 prompt_visible = should_show_item(prompt_item)
                 prompt_item.setHidden(not prompt_visible)
                 if prompt_visible:
                     category_visible = True
-            
+
             category_item.setHidden(not category_visible)
-    
+
     def on_selection_changed(self):
         """Handle tree selection changes."""
         current_item = self.prompt_tree.currentItem()
         if not current_item:
             self.set_editor_enabled(False)
             return
-        
+
         user_data = current_item.data(0, Qt.ItemDataRole.UserRole)
         if not user_data or user_data["type"] != "prompt":
             self.set_editor_enabled(False)
             return
-        
+
         # Load prompt data into editor
         prompt_data = user_data["data"]
         self.name_edit.setText(user_data["name"])
         self.category_edit.setCurrentText(user_data["category"])
         self.description_edit.setText(prompt_data.get("description", ""))
         self.content_edit.setPlainText(prompt_data.get("content", ""))
-        
+
         self.set_editor_enabled(True)
         self.use_prompt_btn.setEnabled(True)
-    
+
     def set_editor_enabled(self, enabled):
         """Enable or disable the editor section."""
         self.name_edit.setEnabled(enabled)
@@ -432,14 +436,14 @@ class PromptLibraryDialog(QDialog):
         self.save_btn.setEnabled(enabled)
         self.revert_btn.setEnabled(enabled)
         self.preview_btn.setEnabled(enabled)
-        
+
         if not enabled:
             self.name_edit.clear()
             self.category_edit.setCurrentText("")
             self.description_edit.clear()
             self.content_edit.clear()
             self.use_prompt_btn.setEnabled(False)
-    
+
     def add_new_prompt(self):
         """Add a new prompt to the library."""
         # Get category (create new if needed)
@@ -448,10 +452,10 @@ class PromptLibraryDialog(QDialog):
             list(self.prompts_data.get("categories", {}).keys()) + ["Create New..."],
             0, True
         )
-        
+
         if not ok:
             return
-        
+
         if category == "Create New...":
             category, ok = QInputDialog.getText(
                 self, "New Category", "Enter new category name:"
@@ -459,7 +463,7 @@ class PromptLibraryDialog(QDialog):
             if not ok or not category.strip():
                 return
             category = category.strip()
-        
+
         # Get prompt name
         name, ok = QInputDialog.getText(
             self, "New Prompt", "Enter prompt name:"
@@ -467,25 +471,25 @@ class PromptLibraryDialog(QDialog):
         if not ok or not name.strip():
             return
         name = name.strip()
-        
+
         # Ensure category exists
         if "categories" not in self.prompts_data:
             self.prompts_data["categories"] = {}
         if category not in self.prompts_data["categories"]:
             self.prompts_data["categories"][category] = {}
-        
+
         # Add new prompt
         self.prompts_data["categories"][category][name] = {
             "description": "New prompt",
             "content": "Enter your prompt here..."
         }
-        
+
         self.save_prompts()
         self.load_prompts_to_tree()
-        
+
         # Select the new prompt
         self.select_prompt(category, name)
-    
+
     def add_new_category(self):
         """Add a new category."""
         name, ok = QInputDialog.getText(
@@ -493,235 +497,228 @@ class PromptLibraryDialog(QDialog):
         )
         if not ok or not name.strip():
             return
-        
+
         name = name.strip()
         if "categories" not in self.prompts_data:
             self.prompts_data["categories"] = {}
-        
+
         if name not in self.prompts_data["categories"]:
             self.prompts_data["categories"][name] = {}
             self.save_prompts()
             self.load_prompts_to_tree()
         else:
-            QMessageBox.information(self, "Category Exists", f"Category '{name}' already exists.")
-    
+            create_themed_message_box(
+                self, "Category Exists",
+                f"Category '{name}' already exists.",
+                "info", self.dark_theme
+            ).exec()
+
     def delete_selected(self):
         """Delete the selected prompt or category."""
         current_item = self.prompt_tree.currentItem()
         if not current_item:
             return
-        
+
         user_data = current_item.data(0, Qt.ItemDataRole.UserRole)
         if not user_data:
             return
-        
+
         if user_data["type"] == "prompt":
             category = user_data["category"]
             name = user_data["name"]
-            
+
             reply = QMessageBox.question(
                 self, "Delete Prompt",
                 f"Are you sure you want to delete the prompt '{name}'?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            
+
             if reply == QMessageBox.StandardButton.Yes:
                 del self.prompts_data["categories"][category][name]
                 self.save_prompts()
                 self.load_prompts_to_tree()
-        
+
         elif user_data["type"] == "category":
             category = user_data["name"]
             prompts_count = len(self.prompts_data["categories"].get(category, {}))
-            
+
             reply = QMessageBox.question(
                 self, "Delete Category",
                 f"Are you sure you want to delete the category '{category}' and all {prompts_count} prompts in it?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            
+
             if reply == QMessageBox.StandardButton.Yes:
                 del self.prompts_data["categories"][category]
                 self.save_prompts()
                 self.load_prompts_to_tree()
-    
+
     def save_current_prompt(self):
         """Save changes to the current prompt."""
         current_item = self.prompt_tree.currentItem()
         if not current_item:
             return
-        
+
         user_data = current_item.data(0, Qt.ItemDataRole.UserRole)
         if not user_data or user_data["type"] != "prompt":
             return
-        
+
         old_category = user_data["category"]
         old_name = user_data["name"]
-        
+
         new_name = self.name_edit.text().strip()
         new_category = self.category_edit.currentText().strip()
         new_description = self.description_edit.text().strip()
         new_content = self.content_edit.toPlainText()
-        
+
         if not new_name or not new_category:
-            QMessageBox.warning(self, "Invalid Data", "Name and category are required.")
+            create_themed_message_box(
+                self, "Invalid Data",
+                "Name and category are required.",
+                "warning", self.dark_theme
+            ).exec()
             return
-        
+
         # Remove old entry
         del self.prompts_data["categories"][old_category][old_name]
-        
+
         # Ensure new category exists
         if new_category not in self.prompts_data["categories"]:
             self.prompts_data["categories"][new_category] = {}
-        
+
         # Add updated entry
         self.prompts_data["categories"][new_category][new_name] = {
             "description": new_description,
             "content": new_content
         }
-        
+
         self.save_prompts()
         self.load_prompts_to_tree()
         self.select_prompt(new_category, new_name)
-        
-        QMessageBox.information(self, "Saved", "Prompt saved successfully.")
-    
+
+        create_themed_message_box(
+            self, "Saved",
+            "Prompt saved successfully.",
+            "success", self.dark_theme
+        ).exec()
+
     def revert_changes(self):
         """Revert editor to original values."""
         self.on_selection_changed()
-    
+
     def preview_prompt(self):
         """Show a preview of the prompt."""
         content = self.content_edit.toPlainText()
         if not content:
             return
-        
+
         # Simple preview dialog
         preview_dialog = QDialog(self)
         preview_dialog.setWindowTitle("Prompt Preview")
         preview_dialog.resize(500, 400)
-        
+
         layout = QVBoxLayout(preview_dialog)
         preview_text = QTextEdit()
         preview_text.setPlainText(content)
         preview_text.setReadOnly(True)
         layout.addWidget(QLabel("Prompt Content:"))
         layout.addWidget(preview_text)
-        
+
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(preview_dialog.accept)
         layout.addWidget(buttons)
-        
+
         preview_dialog.exec()
-    
+
     def use_selected_prompt(self):
-        """Use the selected prompt by emitting it, with template support."""
+        """Use the selected prompt by emitting it."""
         current_item = self.prompt_tree.currentItem()
         if not current_item:
             return
-        
+
         user_data = current_item.data(0, Qt.ItemDataRole.UserRole)
         if not user_data or user_data["type"] != "prompt":
             return
-        
+
         content = user_data["data"].get("content", "")
         if not content:
             return
-        
-        # Check if the prompt contains template variables
-        if self.has_template_variables(content):
-            # Open template dialog to fill variables
-            from ui.prompt_template_dialog import PromptTemplateDialog
-            template_dialog = PromptTemplateDialog(content, self)
-            template_dialog.template_filled.connect(self.on_template_filled)
-            template_dialog.exec()
-        else:
-            # Regular prompt without variables
-            self.prompt_selected.emit(content)
-            self.close()
-    
-    def has_template_variables(self, content: str) -> bool:
-        """Check if content contains template variables {{variable}}."""
-        import re
-        pattern = r'\{\{[^}]+\}\}'
-        return bool(re.search(pattern, content))
-    
-    def on_template_filled(self, filled_content: str):
-        """Handle filled template from template dialog."""
-        self.prompt_selected.emit(filled_content)
+
+        # Simply emit the prompt directly
+        self.prompt_selected.emit(content)
         self.close()
-    
+
     def select_prompt(self, category: str, name: str):
         """Select a specific prompt in the tree."""
         for i in range(self.prompt_tree.topLevelItemCount()):
             category_item = self.prompt_tree.topLevelItem(i)
             if not category_item:
                 continue
-                
+
             category_data = category_item.data(0, Qt.ItemDataRole.UserRole)
-            
+
             if category_data and category_data.get("name") == category:
                 for j in range(category_item.childCount()):
                     prompt_item = category_item.child(j)
                     if not prompt_item:
                         continue
-                        
+
                     prompt_data = prompt_item.data(0, Qt.ItemDataRole.UserRole)
-                    
+
                     if prompt_data and prompt_data.get("name") == name:
                         self.prompt_tree.setCurrentItem(prompt_item)
                         return
-    
+
     def show_context_menu(self, position):
         """Show context menu for tree items."""
         item = self.prompt_tree.itemAt(position)
         if not item:
             return
-        
+
         user_data = item.data(0, Qt.ItemDataRole.UserRole)
         if not user_data:
             return
-        
+
         menu = QMenu(self)
-        
+
         if user_data["type"] == "prompt":
             use_action = QAction("Use Prompt", self)
             use_action.triggered.connect(self.use_selected_prompt)
             menu.addAction(use_action)
-            
+
             menu.addSeparator()
-            
+
             duplicate_action = QAction("Duplicate", self)
             duplicate_action.triggered.connect(self.duplicate_prompt)
             menu.addAction(duplicate_action)
-        
+
         delete_action = QAction("Delete", self)
         delete_action.triggered.connect(self.delete_selected)
         menu.addAction(delete_action)
-        
+
         menu.exec(self.prompt_tree.mapToGlobal(position))
-    
+
     def duplicate_prompt(self):
         """Duplicate the selected prompt."""
         current_item = self.prompt_tree.currentItem()
         if not current_item:
             return
-        
+
         user_data = current_item.data(0, Qt.ItemDataRole.UserRole)
         if not user_data or user_data["type"] != "prompt":
             return
-        
+
         category = user_data["category"]
         original_name = user_data["name"]
         prompt_data = user_data["data"].copy()
-        
+
         # Generate new name
         new_name = f"{original_name} (Copy)"
         counter = 1
         while new_name in self.prompts_data["categories"][category]:
             counter += 1
             new_name = f"{original_name} (Copy {counter})"
-        
+
         # Add duplicate
         self.prompts_data["categories"][category][new_name] = prompt_data
         self.save_prompts()

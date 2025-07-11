@@ -2,7 +2,7 @@
 AI Evaluator module for sentiment analysis and text summarization
 """
 
-from core.config import (TRANSFORMERS_AVAILABLE, logger, pipeline)
+from .config import (TRANSFORMERS_AVAILABLE, logger)
 
 
 class AIEvaluator:
@@ -14,7 +14,7 @@ class AIEvaluator:
         if not TRANSFORMERS_AVAILABLE:
             logger.warning("Transformers not available, skipping sentiment analysis")
             return None
-            
+
         if self.sentiment_analyzer is None:
             try:
                 from transformers.pipelines import pipeline  # type: ignore
@@ -33,7 +33,7 @@ class AIEvaluator:
         if not TRANSFORMERS_AVAILABLE:
             logger.warning("Transformers not available, skipping text summarization")
             return "Summarization not available - transformers package not installed"
-            
+
         try:
             from transformers.pipelines import pipeline
             summarizer = pipeline("summarization")
