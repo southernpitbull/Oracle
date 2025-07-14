@@ -109,6 +109,7 @@ try:
     from api.settings import APISettingsDialog
     from utils.file_utils import *
     from utils.formatting import *
+    from utils.error_handler import start_auto_error_correction, stop_auto_error_correction
 
     logger.info("Successfully imported all modules")
 except ImportError as e:
@@ -153,6 +154,10 @@ def main():
         # Set up the Qt application
         app = setup_application()
 
+        # Start automatic error correction system
+        logger.info("🚀 Starting automatic error correction system...")
+        start_auto_error_correction(interval=60)  # Scan every 60 seconds
+
         # Show splash screen
         from ui.splash_screen import show_splash_screen
         splash, loading_thread = show_splash_screen()
@@ -171,6 +176,16 @@ def main():
         main_window.show()
 
         logger.info("The Oracle application started successfully")
+        logger.info("🔧 Automatic error correction is running (60-second intervals)")
+
+        # Set up cleanup on application exit
+        def cleanup():
+            logger.info("🛑 Stopping automatic error correction...")
+            stop_auto_error_correction()
+            logger.info("✅ Cleanup completed")
+
+        # Register cleanup function
+        app.aboutToQuit.connect(cleanup)
 
         # Run the application
         sys.exit(app.exec())

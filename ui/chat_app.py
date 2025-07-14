@@ -172,6 +172,7 @@ from ui.system_prompt_dialog import SystemPromptDialog
 from ui.message_formatter import MessageFormatter
 from ui.theme_styles import create_themed_message_box
 from ui.icon_manager import get_icon
+from ui.error_correction_widget import ErrorCorrectionDialog
 from utils.file_utils import *
 from utils.formatting import *
 
@@ -827,6 +828,13 @@ class ChatApp(QMainWindow):
                 rag_analytics_action.setToolTip("RAG Analytics (Ctrl+Shift+G)")
                 rag_analytics_action.triggered.connect(self.open_rag_analytics)
                 tools_menu.addAction(rag_analytics_action)
+                
+                # Error Correction System
+                error_correction_action = QAction("Error Correction System", self)
+                error_correction_action.setShortcut(QKeySequence("Ctrl+Shift+E"))
+                error_correction_action.setToolTip("Error Correction System (Ctrl+Shift+E)")
+                error_correction_action.triggered.connect(self.open_error_correction)
+                tools_menu.addAction(error_correction_action)
 
                 # Help menu
                 help_menu = menubar.addMenu("Help")
@@ -2193,6 +2201,20 @@ class ChatApp(QMainWindow):
             )
         except Exception as e:
             logger.error(f"Error opening RAG analytics: {e}")
+
+    def open_error_correction(self):
+        """Open error correction system interface"""
+        try:
+            dialog = ErrorCorrectionDialog(self)
+            dialog.show()
+        except Exception as e:
+            logger.error(f"Error opening error correction system: {e}")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Error",
+                f"Failed to open error correction system: {e}"
+            )
 
     def open_preferences(self):
         """Open application preferences"""
