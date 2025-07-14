@@ -6,8 +6,20 @@ from .clients import (GeminiClient, ClaudeClient, DeepSeekClient, QwenClient,
                      LMStudioClient, LlamaCppClient, NebiusClient, OpenRouterClient, 
                      HuggingFacePlaygroundClient, GoogleAIStudioClient, VLLMClient, PerplexityClient,
                      OllamaClient)
-import requests
-import json
+
+# Local model support
+try:
+    from .local_model_manager import LocalModelManager, LocalModelProvider
+    LOCAL_MODELS_AVAILABLE = True
+except ImportError:
+    LOCAL_MODELS_AVAILABLE = False
+
+# Local model server support
+try:
+    from .local_model_server import LocalModelServerManager, LlamaCppServer, ServerConfig, ModelConfig
+    LOCAL_SERVER_AVAILABLE = True
+except ImportError:
+    LOCAL_SERVER_AVAILABLE = False
 
 
 class MultiProviderClient:
@@ -20,6 +32,12 @@ class MultiProviderClient:
         self._init_provider_structure()
         
         # Initialize local servers first
+        self._init_local_servers()
+        
+        # Initialize local models
+        self._init_local_models()
+        
+        # Initialize local model servers
         self._init_local_servers()
         
         # Set defaults
@@ -38,6 +56,12 @@ class MultiProviderClient:
             "llama.cpp": {"client": None, "models": [], "category": "Local Servers"},
             "vLLM": {"client": None, "models": [], "category": "Local Servers"}
         })
+        
+        # Local Models (llama.cpp with multiple backends)
+        if LOCAL_MODELS_AVAILABLE:
+            self.providers.update({
+                "Local Models": {"client": None, "models": [], "category": "Local Models"}
+            })
         
         # AI Studios
         self.providers.update({
@@ -96,6 +120,40 @@ class MultiProviderClient:
                 self.providers["vLLM"]["models"] = models
         except Exception as e:
             logger.warning(f"Failed to initialize vLLM client: {e}")
+    
+    def _init_local_models(self):
+        """Initialize local model manager and provider"""
+        if LOCAL_MODELS_AVAILABLE:
+            try:
+                # Initialize local model manager
+                self.local_model_manager = LocalModelManager()
+                
+                # Initialize local model provider
+                local_provider = LocalModelProvider(self.local_model_manager)
+                self.providers["Local Models"]["client"] = local_provider
+                self.providers["Local Models"]["models"] = local_provider.get_models()
+                
+                logger.info("Local model manager initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize local model manager: {e}")
+    
+    def _init_local_servers(self):
+        """Initialize local model server manager"""
+        if LOCAL_SERVER_AVAILABLE:
+            try:
+                # Initialize local model server manager
+                self.local_server_manager = LocalModelServerManager()
+                
+                # Add local server provider
+                self.providers["Local Server"] = {
+                    "client": self.local_server_manager,
+                    "models": [],
+                    "category": "Local Servers"
+                }
+                
+                logger.info("Local model server manager initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize local model server manager: {e}")
 
     def load_settings(self):
         """Load API keys and settings from QSettings"""
@@ -204,7 +262,6 @@ class MultiProviderClient:
         # Reinitialize Ollama with new host if needed
         if endpoints["ollama_host"] != "http://127.0.0.1:11434" and OLLAMA_AVAILABLE:
             try:
-                from ollama import Client as OllamaClient
                 self.providers["Ollama"]["client"] = OllamaClient(host=endpoints["ollama_host"])
             except Exception as e:
                 logger.warning(f"Failed to reinitialize Ollama with new host: {e}")
@@ -363,3 +420,26 @@ class MultiProviderClient:
         if "Ollama" in self.providers and self.providers["Ollama"]["client"]:
             return self.providers["Ollama"]["client"].is_available()
         return False
+
+    def set_provider(self, provider_name):
+        """
+        Set the current provider by name.
+        :param provider_name: str, the name of the provider to switch to
+        :raises ValueError: if provider_name is not in self.providers
+        """
+        if provider_name not in self.providers:
+            logger.error(f"Provider '{provider_name}' not found in available providers: {list(self.providers.keys())}")
+            raise ValueError(f"Provider '{provider_name}' not found.")
+        self.current_provider = provider_name
+        logger.info(f"Switched to provider: {provider_name}")
+
+    def get_models_for_provider(self, provider_name: str):
+        """
+        Return the list of models for the specified provider.
+        :param provider_name: str, the name of the provider
+        :return: list of model names, or an empty list if not found
+        """
+        provider = self.providers.get(provider_name)
+        if provider and "models" in provider:
+            return provider["models"]
+        return []

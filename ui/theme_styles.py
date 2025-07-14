@@ -3,7 +3,7 @@ Theme-aware styling utilities for dialogs and components
 """
 
 import os
-from typing import Dict, Optional
+from typing import Optional
 
 
 def get_dialog_theme_styles(dark_theme: bool = True, icon_path: Optional[str] = None) -> str:
@@ -587,7 +587,7 @@ def create_themed_message_box(parent, title: str, message: str, message_type: st
         QMessageBox instance
     """
     from PyQt6.QtWidgets import QMessageBox
-    from PyQt6.QtGui import QIcon, QPixmap
+    from PyQt6.QtGui import QPixmap
 
     msg_box = QMessageBox(parent)
     msg_box.setWindowTitle(title)
@@ -612,3 +612,87 @@ def create_themed_message_box(parent, title: str, message: str, message_type: st
     msg_box.setStyleSheet(get_message_box_styles(dark_theme, message_type))
 
     return msg_box
+
+
+class ThemeManager:
+    """Theme management class for The Oracle application."""
+    
+    def __init__(self, dark_theme: bool = True):
+        """
+        Initialize theme manager.
+        
+        Args:
+            dark_theme: Whether to use dark theme by default
+        """
+        self.dark_theme = dark_theme
+        self.available_themes = ["dark", "light", "auto"]
+        self.current_theme = "dark" if dark_theme else "light"
+    
+    def get_available_themes(self) -> list:
+        """Get list of available themes."""
+        return self.available_themes.copy()
+    
+    def get_theme_stylesheet(self, theme: str = None) -> str:
+        """
+        Get stylesheet for specified theme.
+        
+        Args:
+            theme: Theme name (dark, light, auto)
+            
+        Returns:
+            QSS stylesheet string
+        """
+        if theme is None:
+            theme = self.current_theme
+        
+        if theme == "dark":
+            return get_dialog_theme_styles(dark_theme=True)
+        elif theme == "light":
+            return get_dialog_theme_styles(dark_theme=False)
+        elif theme == "auto":
+            # Auto theme - use system preference
+            return get_dialog_theme_styles(dark_theme=self.dark_theme)
+        else:
+            # Default to dark theme
+            return get_dialog_theme_styles(dark_theme=True)
+    
+    def apply_theme(self, widget, theme: str = None):
+        """
+        Apply theme to a widget.
+        
+        Args:
+            widget: Qt widget to apply theme to
+            theme: Theme name (optional)
+        """
+        if theme:
+            self.current_theme = theme
+        
+        stylesheet = self.get_theme_stylesheet(self.current_theme)
+        widget.setStyleSheet(stylesheet)
+    
+    def set_theme(self, theme: str):
+        """
+        Set the current theme.
+        
+        Args:
+            theme: Theme name
+        """
+        if theme in self.available_themes:
+            self.current_theme = theme
+        else:
+            raise ValueError(f"Unknown theme: {theme}")
+    
+    def get_current_theme(self) -> str:
+        """Get the current theme name."""
+        return self.current_theme
+    
+    def is_dark_theme(self) -> bool:
+        """Check if current theme is dark."""
+        return self.current_theme == "dark"
+    
+    def toggle_theme(self):
+        """Toggle between dark and light themes."""
+        if self.current_theme == "dark":
+            self.current_theme = "light"
+        else:
+            self.current_theme = "dark"

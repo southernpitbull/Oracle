@@ -33,3 +33,11 @@ markdown
 PyPDF2
 plotly
 reportlab
+psutil
+
+# Local model server dependencies (OPTIONAL - requires C++ compiler)
+# If you get compilation errors, try: pip install llama-cpp-python --prefer-binary
+# Or install Visual Studio Build Tools for Windows
+llama-cpp-python
+requests
+websockets

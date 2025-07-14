@@ -10,8 +10,8 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox, QGroupBox, QPushButton, QGridLayout, QCheckBox,
     QComboBox, QTabWidget, QWidget, QScrollArea, QFrame, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QPalette, QIcon
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont, QIcon
 from .theme_styles import get_dialog_theme_styles, get_icon_path
 
 
@@ -19,7 +19,6 @@ class ModelSettingsDialog(QDialog):
     """Dialog for configuring model parameters"""
 
     # Signal emitted when settings are applied
-    settings_applied = pyqtSignal(dict)
 
     def __init__(self, parent=None, current_model="", current_provider="", current_settings=None, dark_theme=True):
         super().__init__(parent)
@@ -488,7 +487,7 @@ class ModelSettingsDialog(QDialog):
             try:
                 with open(self.settings_file, 'r') as f:
                     saved_settings = json.load(f)
-            except:
+            except Exception:
                 pass
 
         # Save settings for current model

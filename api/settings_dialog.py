@@ -4,7 +4,7 @@ API Settings Dialog for managing API keys
 
 import json
 from pathlib import Path
-from core.config import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+from core.config import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                         QLineEdit, QGroupBox, QScrollArea, QWidget, QMessageBox,
                         QSettings, Qt, webbrowser, QIcon)
 from ui.theme_styles import get_dialog_theme_styles, get_icon_path, create_themed_message_box

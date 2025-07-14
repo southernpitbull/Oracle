@@ -3,7 +3,8 @@ API Settings dialog for managing API keys
 """
 from core.config import (QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, 
                         QGroupBox, QHBoxLayout, QScrollArea, QWidget, QMessageBox,
-                        QSettings, json, webbrowser)
+                        QSettings, json)
+import webbrowser
 from pathlib import Path
 
 

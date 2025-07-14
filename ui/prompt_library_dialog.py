@@ -6,9 +6,8 @@ organized by category, that can be inserted into the chat with one click.
 """
 
 import json
-import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
@@ -16,7 +15,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QInputDialog, QGroupBox, QFormLayout, QDialogButtonBox,
     QMenu, QHeaderView
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QFont, QIcon
 from .theme_styles import get_dialog_theme_styles, get_icon_path, create_themed_message_box
 
@@ -24,7 +23,6 @@ from .theme_styles import get_dialog_theme_styles, get_icon_path, create_themed_
 class PromptLibraryDialog(QDialog):
     """Dialog for managing prompt library with categories and search functionality."""
 
-    prompt_selected = pyqtSignal(str)  # Emitted when a prompt is selected for insertion
 
     def __init__(self, parent=None, dark_theme=True):
         super().__init__(parent)

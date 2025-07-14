@@ -2,7 +2,7 @@
 Utility modules for The Oracle chat application.
 """
 
-from .dependencies import check_and_install_dependencies, add_python_to_path
+from .dependencies import check_and_install
 from .file_utils import (
     get_attachments_dir, get_exports_dir, get_user_attachments_dir,
     get_assistant_attachments_dir, save_attachment, load_attachment,
@@ -19,8 +19,7 @@ from .formatting import (
 
 __all__ = [
     # Dependencies
-    'check_and_install_dependencies',
-    'add_python_to_path',
+    'check_and_install',
     
     # File utilities
     'get_attachments_dir',

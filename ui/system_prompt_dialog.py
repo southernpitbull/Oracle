@@ -3,9 +3,6 @@ System Prompt Dialog for The Oracle
 Allows users to set custom system prompts per conversation
 """
 
-import sys
-import os
-from core.config import *
 from .theme_styles import get_dialog_theme_styles, get_icon_path
 
 class SystemPromptDialog(QDialog):

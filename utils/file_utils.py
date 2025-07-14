@@ -4,18 +4,15 @@ File utilities for handling attachments, exports, and file operations.
 
 import os
 import json
-import shutil
 import zipfile
 import logging
 from datetime import datetime
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 # Directories
 ATTACHMENTS_DIR = "attachments"
 EXPORTS_DIR = "exports"
-MEMORY_DB = "memory.db"
 
 # Ensure directories exist
 os.makedirs(ATTACHMENTS_DIR, exist_ok=True)

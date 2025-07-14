@@ -2,13 +2,11 @@
 API Clients module for multi-provider LLM access
 """
 
-from pathlib import Path
 import json
 import requests
 from core.config import (GEMINI_AVAILABLE, ANTHROPIC_AVAILABLE, OPENAI_AVAILABLE, 
                         OLLAMA_AVAILABLE, genai, anthropic, openai, 
                         QSettings, logger)
-
 
 class APIClient:
     """Base class for API clients"""
@@ -24,7 +22,6 @@ class APIClient:
     def generate_response(self, prompt, model, stream=False, system_message=None, model_params=None):
         """Generate response from the API"""
         raise NotImplementedError
-
 
 class GeminiClient(APIClient):
     """Google Gemini API client"""
@@ -72,7 +69,6 @@ class GeminiClient(APIClient):
                     yield str(response)
         except Exception as e:
             raise Exception(f"Gemini API error: {e}")
-
 
 class ClaudeClient(APIClient):
     """Anthropic Claude API client"""
@@ -143,7 +139,6 @@ class ClaudeClient(APIClient):
         except Exception as e:
             raise Exception(f"Claude API error: {e}")
 
-
 class DeepSeekClient(APIClient):
     """DeepSeek API client"""
     def __init__(self, api_key=None):
@@ -189,7 +184,6 @@ class DeepSeekClient(APIClient):
         except Exception as e:
             raise Exception(f"DeepSeek API error: {e}")
 
-
 class QwenClient(APIClient):
     """Qwen API client"""
     def __init__(self, api_key=None):
@@ -234,7 +228,6 @@ class QwenClient(APIClient):
                     yield str(response)
         except Exception as e:
             raise Exception(f"Qwen API error: {e}")
-
 
 class OpenAIClient(APIClient):
     """OpenAI API client"""
@@ -308,7 +301,6 @@ class OpenAIClient(APIClient):
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             raise Exception(f"OpenAI API error: {e}")
-
 
 class LMStudioClient(APIClient):
     """LM Studio API client (OpenAI-compatible)"""
@@ -386,7 +378,6 @@ class LMStudioClient(APIClient):
             logger.error(f"LM Studio API error: {e}")
             raise Exception(f"LM Studio API error: {e}")
 
-
 class LlamaCppClient(APIClient):
     """llama.cpp server API client"""
     def __init__(self, base_url="http://127.0.0.1:8080"):
@@ -460,7 +451,6 @@ class LlamaCppClient(APIClient):
             logger.error(f"llama.cpp API error: {e}")
             raise Exception(f"llama.cpp API error: {e}")
 
-
 class GroqClient(APIClient):
     """Groq API client"""
     def __init__(self, api_key=None):
@@ -508,7 +498,6 @@ class GroqClient(APIClient):
             logger.error(f"Groq API error: {e}")
             raise Exception(f"Groq API error: {e}")
 
-
 class NebiusClient(APIClient):
     """Nebius AI Studio API client"""
     def __init__(self, api_key=None):
@@ -516,17 +505,24 @@ class NebiusClient(APIClient):
         self.name = "Nebius AI Studio"
         self.base_url = "https://api.studio.nebius.ai/v1"
         self.models = []
-        if api_key:
+        if api_key and OPENAI_AVAILABLE and openai:
             try:
                 self.client = openai.OpenAI(api_key=api_key, base_url=self.base_url)
                 self.refresh_models()
             except Exception as e:
                 logger.error(f"Failed to initialize Nebius client: {e}")
                 self.client = None
+        else:
+            if not OPENAI_AVAILABLE:
+                logger.warning("OpenAI library not available for Nebius client")
+            elif not openai:
+                logger.warning("OpenAI module not properly imported for Nebius client")
+            self.client = None
 
     def refresh_models(self):
         """Refresh available models from Nebius"""
         if not self.client:
+            logger.warning("Nebius client not initialized, cannot refresh models")
             return []
         try:
             response = self.client.models.list()
@@ -570,7 +566,6 @@ class NebiusClient(APIClient):
             logger.error(f"Nebius API error: {e}")
             raise Exception(f"Nebius API error: {e}")
 
-
 class OpenRouterClient(APIClient):
     """OpenRouter.ai API client"""
     def __init__(self, api_key=None):
@@ -578,17 +573,24 @@ class OpenRouterClient(APIClient):
         self.name = "OpenRouter.ai"
         self.base_url = "https://openrouter.ai/api/v1"
         self.models = []
-        if api_key:
+        if api_key and OPENAI_AVAILABLE and openai:
             try:
                 self.client = openai.OpenAI(api_key=api_key, base_url=self.base_url)
                 self.refresh_models()
             except Exception as e:
                 logger.error(f"Failed to initialize OpenRouter client: {e}")
                 self.client = None
+        else:
+            if not OPENAI_AVAILABLE:
+                logger.warning("OpenAI library not available for OpenRouter client")
+            elif not openai:
+                logger.warning("OpenAI module not properly imported for OpenRouter client")
+            self.client = None
 
     def refresh_models(self):
         """Refresh available models from OpenRouter"""
         if not self.client:
+            logger.warning("OpenRouter client not initialized, cannot refresh models")
             return []
         try:
             response = self.client.models.list()
@@ -631,7 +633,6 @@ class OpenRouterClient(APIClient):
         except Exception as e:
             logger.error(f"OpenRouter API error: {e}")
             raise Exception(f"OpenRouter API error: {e}")
-
 
 class HuggingFacePlaygroundClient(APIClient):
     """Hugging Face Playground API client"""
@@ -681,7 +682,6 @@ class HuggingFacePlaygroundClient(APIClient):
         except Exception as e:
             logger.error(f"Hugging Face API error: {e}")
             raise Exception(f"Hugging Face API error: {e}")
-
 
 class GoogleAIStudioClient(APIClient):
     """Google AI Studio API client (alternative to Gemini)"""
@@ -734,7 +734,6 @@ class GoogleAIStudioClient(APIClient):
         except Exception as e:
             logger.error(f"Google AI Studio API error: {e}")
             raise Exception(f"Google AI Studio API error: {e}")
-
 
 class VLLMClient(APIClient):
     """vLLM API client"""
@@ -823,7 +822,6 @@ class MultiProviderClient:
         # Initialize Ollama client if available
         if OLLAMA_AVAILABLE:
             try:
-                from ollama import Client as OllamaClient
                 self.providers["Ollama"]["client"] = OllamaClient(host="http://127.0.0.1:11434")
             except Exception as e:
                 logger.warning(f"Failed to initialize Ollama client: {e}")
@@ -938,7 +936,6 @@ class MultiProviderClient:
             for chunk in client.generate_response(prompt, self.current_model, stream=stream):
                 yield chunk
 
-
 class PerplexityClient(APIClient):
     """Perplexity AI API client"""
     def __init__(self, api_key=None):
@@ -993,7 +990,6 @@ class PerplexityClient(APIClient):
         except Exception as e:
             logger.error(f"Perplexity API error: {e}")
             raise Exception(f"Perplexity API error: {e}")
-
 
 class OllamaClient(APIClient):
     """Ollama API client using ollama-python library"""

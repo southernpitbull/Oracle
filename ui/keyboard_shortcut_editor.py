@@ -6,9 +6,8 @@ like "New Chat," "Send Message," etc.
 """
 
 import json
-import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
@@ -16,7 +15,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QKeySequenceEdit, QHeaderView, QTabWidget, QWidget,
     QTextEdit, QCheckBox, QComboBox, QSpacerItem, QSizePolicy, QFileDialog
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QSettings
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeySequence, QFont, QIcon
 from .theme_styles import get_dialog_theme_styles, get_icon_path, create_themed_message_box
 
@@ -24,7 +23,6 @@ from .theme_styles import get_dialog_theme_styles, get_icon_path, create_themed_
 class KeyboardShortcutEditor(QDialog):
     """Dialog for editing keyboard shortcuts."""
 
-    shortcuts_changed = pyqtSignal(dict)  # Emitted when shortcuts are changed
 
     def __init__(self, parent=None, dark_theme=True):
         super().__init__(parent)

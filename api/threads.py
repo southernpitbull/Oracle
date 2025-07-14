@@ -2,13 +2,10 @@
 Threading module for handling API responses
 """
 
-from core.config import QThread, pyqtSignal
+from core.config import QThread
 
 
 class ModelResponseThread(QThread):
-    response_chunk = pyqtSignal(str)
-    response_finished = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
 
     def __init__(self, ollama_client, model, prompt, model_params=None, system_message=None):
         super().__init__()
@@ -38,9 +35,6 @@ class ModelResponseThread(QThread):
 
 class MultiProviderResponseThread(QThread):
     """Thread for handling multi-provider responses"""
-    response_chunk = pyqtSignal(str)
-    response_finished = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
 
     def __init__(self, client, prompt, provider=None, model=None, system_message=None, model_params=None):
         super().__init__()

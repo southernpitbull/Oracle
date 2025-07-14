@@ -27,22 +27,18 @@ New Feature: AI-Assisted Generation
 - Ensures narrative consistency and coherence across all sections
 """
 
-import json
-import os
-import re
-from typing import List, Dict, Tuple, Any
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTextEdit,
+from typing import Dict, Any
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, 
                              QPushButton, QLabel, QScrollArea, QWidget,
                              QGroupBox, QInputDialog, QApplication)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QIcon, QPixmap
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 from .theme_styles import get_dialog_theme_styles, create_themed_message_box, get_icon_path
 
 
 class PromptTemplateDialog(QDialog):
     """Dialog for creating comprehensive prompts using a structured framework"""
 
-    template_selected = pyqtSignal(str)
 
     def __init__(self, parent=None, dark_theme=True, multi_client=None):
         super().__init__(parent)
