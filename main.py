@@ -160,11 +160,33 @@ def main():
         # Process events to show splash screen
         app.processEvents()
 
-        # Wait for loading to complete
-        loading_thread.wait()
-
-        # Create main window with enhanced UI
+        # Create main window with real progress updates
+        splash.update_progress(10, "Initializing main window...")
+        app.processEvents()
+        
+        splash.update_progress(20, "Loading configuration...")
+        app.processEvents()
+        
+        # Create the main window
         main_window = ChatApp()
+        
+        splash.update_progress(40, "Setting up UI components...")
+        app.processEvents()
+        
+        splash.update_progress(60, "Loading themes and styles...")
+        app.processEvents()
+        
+        splash.update_progress(80, "Initializing providers...")
+        app.processEvents()
+        
+        splash.update_progress(95, "Finalizing setup...")
+        app.processEvents()
+        
+        splash.update_progress(100, "Application ready!")
+        app.processEvents()
+
+        # Wait for loading thread to complete
+        loading_thread.wait()
 
         # Hide splash screen and show main window
         splash.finish(main_window)
