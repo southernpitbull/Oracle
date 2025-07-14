@@ -4,6 +4,9 @@ Allows users to set custom system prompts per conversation
 """
 
 from .theme_styles import get_dialog_theme_styles, get_icon_path
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QGroupBox, QPushButton, QTextEdit, QHBoxLayout
+from PyQt6.QtGui import QIcon
+
 
 class SystemPromptDialog(QDialog):
     """Dialog for setting system prompts for conversations"""

@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence, QColor, QPixmap, QAction, QShortcut
-from PyQt6.QtGui import QApplication
+from PyQt6.QtWidgets import QApplication
 
 # Import comprehensive error handling
 from utils.error_handler import (
@@ -52,6 +52,14 @@ from ui.last_read_marker_widget import LastReadMarkerDialog
 
 # Use the logger from dependencies
 from utils.dependencies import log as logger
+
+# Import API settings dialog
+from ui.api_settings_dialog import APISettingsDialog
+from ui.prompt_library_dialog import PromptLibraryDialog
+from ui.prompt_template_dialog import PromptTemplateDialog
+from ui.keyboard_shortcut_editor import KeyboardShortcutEditor
+from ui.system_prompt_dialog import SystemPromptDialog
+from ui.model_settings_dialog import ModelSettingsDialog
 
 
 class SlidingPanel(QFrame):
@@ -1584,43 +1592,122 @@ class MainWindow(QMainWindow):
                     background: #0078d4;
                 }
             """)
-            
-            # File menu
-            file_menu = menubar.addMenu("📁 File")
-            
-            new_action = QAction("🆕 New Conversation", self)
+
+            # --- FILE MENU ---
+            file_menu = menubar.addMenu(self.tr("📁 File"))
+            new_action = QAction(self.tr("🆕 New Conversation"), self)
             new_action.setShortcut(QKeySequence.StandardKey.New)
+            new_action.setToolTip(self.tr("Start a new conversation"))
             new_action.triggered.connect(self.new_conversation)
             file_menu.addAction(new_action)
-            
-            exit_action = QAction("🚪 Exit", self)
+            # Add more file actions as completed features become available
+            exit_action = QAction(self.tr("🚪 Exit"), self)
             exit_action.setShortcut(QKeySequence.StandardKey.Quit)
+            exit_action.setToolTip(self.tr("Exit The Oracle"))
             exit_action.triggered.connect(self.close)
             file_menu.addAction(exit_action)
-            
-            # Tools menu
-            tools_menu = menubar.addMenu("🔧 Tools")
-            
-            tag_manager_action = QAction("🏷️ Tag Manager", self)
-            tag_manager_action.setShortcut(QKeySequence("Ctrl+T"))
+
+            # --- EDIT MENU ---
+            edit_menu = menubar.addMenu(self.tr("✏️ Edit"))
+            # Example: Undo/Redo if implemented
+            # undo_action = QAction(self.tr("Undo"), self)
+            # undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+            # edit_menu.addAction(undo_action)
+            # ... (add more as completed)
+
+            # --- VIEW MENU ---
+            view_menu = menubar.addMenu(self.tr("👁️ View"))
+            # Example: Toggle Theme
+            toggle_theme_action = QAction(self.tr("Toggle Theme"), self)
+            toggle_theme_action.setShortcut(self.tr("Ctrl+Shift+T"))
+            toggle_theme_action.setToolTip(self.tr("Toggle between light and dark themes"))
+            toggle_theme_action.triggered.connect(self.toggle_theme)
+            view_menu.addAction(toggle_theme_action)
+            # ... (add more as completed)
+
+            # --- CONVERSATION MENU ---
+            conversation_menu = menubar.addMenu(self.tr("💬 Conversation"))
+            # Example: New Conversation
+            conv_new_action = QAction(self.tr("New Conversation"), self)
+            conv_new_action.setShortcut(self.tr("Ctrl+N"))
+            conv_new_action.setToolTip(self.tr("Start a new conversation"))
+            conv_new_action.triggered.connect(self.new_conversation)
+            conversation_menu.addAction(conv_new_action)
+            # ... (add more as completed)
+
+            # --- MODELS MENU ---
+            models_menu = menubar.addMenu(self.tr("🤖 Models"))
+            # Example: Quick Switch Model
+            quick_switch_action = QAction(self.tr("Quick Switch Model"), self)
+            quick_switch_action.setShortcut(self.tr("Ctrl+M"))
+            quick_switch_action.setToolTip(self.tr("Quickly switch between models"))
+            quick_switch_action.triggered.connect(self.show_quick_switch)
+            models_menu.addAction(quick_switch_action)
+            # ... (add more as completed)
+
+            # --- TOOLS MENU ---
+            tools_menu = menubar.addMenu(self.tr("🔧 Tools"))
+            tag_manager_action = QAction(self.tr("Tag Manager"), self)
+            tag_manager_action.setShortcut(self.tr("Ctrl+T"))
+            tag_manager_action.setToolTip(self.tr("Manage conversation tags"))
             tag_manager_action.triggered.connect(self.show_tag_manager)
             tools_menu.addAction(tag_manager_action)
-            
-            # Quick switch model menu action
-            quick_switch_action = QAction("🔄 Quick Switch Model", self)
-            quick_switch_action.setShortcut(QKeySequence("Ctrl+M"))
-            quick_switch_action.triggered.connect(self.show_quick_switch)
-            tools_menu.addAction(quick_switch_action)
-            
-            # Last read marker action
-            last_read_action = QAction("📖 Last Read Markers", self)
-            last_read_action.setShortcut(QKeySequence("Ctrl+L"))
+            last_read_action = QAction(self.tr("Last Read Markers"), self)
+            last_read_action.setShortcut(self.tr("Ctrl+L"))
+            last_read_action.setToolTip(self.tr("Show last read markers"))
             last_read_action.triggered.connect(self.show_last_read_markers)
             tools_menu.addAction(last_read_action)
-            
+            command_palette_action = QAction(self.tr("Command Palette"), self)
+            command_palette_action.setShortcut(self.tr("Ctrl+Shift+P"))
+            command_palette_action.setToolTip(self.tr("Open the command palette for quick actions"))
+            command_palette_action.triggered.connect(self.show_command_palette)
+            tools_menu.addAction(command_palette_action)
+            # Quick Switch Model is in Models menu
+
+            # --- SETTINGS MENU ---
+            settings_menu = menubar.addMenu(self.tr("⚙️ Settings"))
+            api_settings_action = QAction(self.tr("API Settings"), self)
+            api_settings_action.setToolTip(self.tr("Configure API keys and providers"))
+            api_settings_action.triggered.connect(self.show_api_settings)
+            settings_menu.addAction(api_settings_action)
+            shortcut_editor_action = QAction(self.tr("Keyboard Shortcuts"), self)
+            shortcut_editor_action.setToolTip(self.tr("Edit keyboard shortcuts"))
+            shortcut_editor_action.triggered.connect(self.show_keyboard_shortcut_editor)
+            settings_menu.addAction(shortcut_editor_action)
+            model_settings_action = QAction(self.tr("Model Settings"), self)
+            model_settings_action.setToolTip(self.tr("Configure model parameters"))
+            model_settings_action.triggered.connect(self.show_model_settings)
+            settings_menu.addAction(model_settings_action)
+            prompt_library_action = QAction(self.tr("Prompt Library"), self)
+            prompt_library_action.setToolTip(self.tr("Manage your prompt library"))
+            prompt_library_action.triggered.connect(self.show_prompt_library)
+            settings_menu.addAction(prompt_library_action)
+            prompt_template_action = QAction(self.tr("Prompt Template Builder"), self)
+            prompt_template_action.setToolTip(self.tr("Build and manage prompt templates"))
+            prompt_template_action.triggered.connect(self.show_prompt_template)
+            settings_menu.addAction(prompt_template_action)
+            system_prompt_action = QAction(self.tr("System Prompt Editor"), self)
+            system_prompt_action.setToolTip(self.tr("Edit the system prompt for conversations"))
+            system_prompt_action.triggered.connect(self.show_system_prompt_editor)
+            settings_menu.addAction(system_prompt_action)
+            # ... (add more as completed)
+
+            # --- HELP MENU ---
+            help_menu = menubar.addMenu(self.tr("❓ Help"))
+            # Example: About
+            about_action = QAction(self.tr("About"), self)
+            about_action.setToolTip(self.tr("About The Oracle"))
+            about_action.triggered.connect(lambda: QMessageBox.about(self, self.tr("About The Oracle"), self.tr("The Oracle - AI Chat Application\nVersion 2.0.0")))
+            help_menu.addAction(about_action)
+            # ... (add more as completed)
+
+            # --- EXPERIMENTAL MENU ---
+            experimental_menu = menubar.addMenu(self.tr("🧪 Experimental"))
+            # Add experimental features here as they are completed
+
             if hasattr(logger, 'info'):
                 logger.info("Menu setup completed successfully")
-            
+
         except Exception as exc:
             if hasattr(logger, 'error'):
                 logger.error("Failed to setup menu: {}".format(exc))
@@ -2194,3 +2281,45 @@ class MainWindow(QMainWindow):
         self.content_splitter.repaint()
         self.centralWidget().updateGeometry()
         self.centralWidget().repaint()
+
+    def show_api_settings(self):
+        if self.api_settings_dialog is None:
+            self.api_settings_dialog = APISettingsDialog(self, dark_theme=True)
+        self.api_settings_dialog.show()
+        self.api_settings_dialog.raise_()
+        self.api_settings_dialog.activateWindow()
+
+    def show_prompt_library(self):
+        if self.prompt_library_dialog is None:
+            self.prompt_library_dialog = PromptLibraryDialog(self, dark_theme=True)
+        self.prompt_library_dialog.show()
+        self.prompt_library_dialog.raise_()
+        self.prompt_library_dialog.activateWindow()
+
+    def show_prompt_template(self):
+        if self.prompt_template_dialog is None:
+            self.prompt_template_dialog = PromptTemplateDialog(self, dark_theme=True)
+        self.prompt_template_dialog.show()
+        self.prompt_template_dialog.raise_()
+        self.prompt_template_dialog.activateWindow()
+
+    def show_keyboard_shortcut_editor(self):
+        if self.keyboard_shortcut_editor is None:
+            self.keyboard_shortcut_editor = KeyboardShortcutEditor(self, dark_theme=True)
+        self.keyboard_shortcut_editor.show()
+        self.keyboard_shortcut_editor.raise_()
+        self.keyboard_shortcut_editor.activateWindow()
+
+    def show_system_prompt_editor(self):
+        if self.system_prompt_dialog is None:
+            self.system_prompt_dialog = SystemPromptDialog(parent=self, dark_theme=True)
+        self.system_prompt_dialog.show()
+        self.system_prompt_dialog.raise_()
+        self.system_prompt_dialog.activateWindow()
+
+    def show_model_settings(self):
+        if self.model_settings_dialog is None:
+            self.model_settings_dialog = ModelSettingsDialog(self, dark_theme=True)
+        self.model_settings_dialog.show()
+        self.model_settings_dialog.raise_()
+        self.model_settings_dialog.activateWindow()
